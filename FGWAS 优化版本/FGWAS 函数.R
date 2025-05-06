@@ -126,4 +126,4 @@ FMR_trio_optimized <- function(data_test) {
   
   return(A)
 }
-da
+ds
