@@ -1,3 +1,4 @@
+
 FMR_trio_optimized <- function(data_test) {
   n <- nrow(data_test) # 获取样本量
   
@@ -126,4 +127,5 @@ FMR_trio_optimized <- function(data_test) {
   
   return(A)
 }
-dsds
+
+
