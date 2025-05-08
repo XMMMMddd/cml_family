@@ -1,4 +1,136 @@
 library(dplyr)
+library(MASS)
+# 辅助函数：创建相关矩阵
+.create_correlation_matrix_r <- function(n_snps, correlation_type, correlation_param) {
+  if (n_snps <= 0) {
+    return(matrix(nrow = 0, ncol = 0))
+  }
+  if (n_snps == 1) {
+    return(matrix(1, nrow = 1, ncol = 1))
+  }
+
+  if (correlation_type == "independent") {
+    # 不相关的 SNPs，生成单位矩阵
+    corr_matrix <- diag(n_snps)
+  } else if (correlation_type == "equicorrelated") {
+    # 所有 SNP 之间具有相同的相关系数 rho
+    rho <- correlation_param
+    if (n_snps > 1 && (rho < -1 / (n_snps - 1) - 1e-9 || rho > 1.0 + 1e-9)) { # 允许小的浮点误差
+      warning(paste0(
+        "对于 ", n_snps, " 个 SNPs 的等相关矩阵, rho (相关系数) = ", rho,
+        " 可能导致矩阵非正定。",
+        " 建议 rho 在 [", round(-1 / (n_snps - 1), 3), ", 1.0] 范围内。"
+      ))
+    }
+    corr_matrix <- matrix(rho, nrow = n_snps, ncol = n_snps)
+    diag(corr_matrix) <- 1.0
+  } else if (correlation_type == "ar1") {
+    # 一阶自回归 (AR1) 相关结构
+    rho <- correlation_param
+    if (abs(rho) > 1.0) {
+      stop("对于 AR1 相关性, rho (相关系数) 必须在 -1.0 和 1.0 之间。")
+    }
+    indices <- 1:n_snps
+    # 创建指数的绝对差矩阵
+    abs_diff_indices <- abs(outer(indices, indices, "-"))
+    corr_matrix <- rho^abs_diff_indices
+  } else {
+    stop(paste0(
+      "未知的 correlation_type: ", correlation_type,
+      "。有效类型为 'independent', 'equicorrelated', 'ar1'。"
+    ))
+  }
+  return(corr_matrix)
+}
+
+# 创建 SNPs 的函数
+#' @param correlation_type 可以取 "independent, equicorrelated ar1"
+simulate_snps_r <- function(n_samples, n_snps, mafs = 0.1,
+                            correlation_type = "independent", correlation_param = 0.5,
+                            custom_corr_matrix = NULL) {
+  # 处理 n_snps 为 0 的情况
+  if (n_snps == 0) {
+    return(matrix(NA, nrow = n_samples, ncol = 0))
+  }
+
+  # 1. 确定 MAFs
+  actual_mafs <- NULL
+  actual_mafs <- mafs
+
+  # 2. 定义潜在变量的相关矩阵
+  corr_matrix <- NULL
+  if (n_snps == 1 && correlation_type != "custom") {
+    corr_matrix <- matrix(1.0, nrow = 1, ncol = 1)
+  } else if (correlation_type == "custom") {
+    if (is.null(custom_corr_matrix)) {
+      stop("如果 correlation_type 为 'custom', 则必须提供 custom_corr_matrix。")
+    }
+    if (!is.matrix(custom_corr_matrix) || nrow(custom_corr_matrix) != n_snps || ncol(custom_corr_matrix) != n_snps) {
+      stop(paste0("custom_corr_matrix 必须是一个 (", n_snps, "x", n_snps, ") 的矩阵。"))
+    }
+    if (!isSymmetric(custom_corr_matrix, tol = 1e-6)) warning("custom_corr_matrix 不是对称的。")
+    if (any(abs(diag(custom_corr_matrix) - 1) > 1e-9)) warning("custom_corr_matrix 的对角线元素不全为 1。")
+    corr_matrix <- custom_corr_matrix
+  } else {
+    corr_matrix <- .create_correlation_matrix_r(n_snps, correlation_type, correlation_param)
+  }
+
+  # 3. 从多元正态分布中模拟潜在连续变量
+  mean_vector <- rep(0, n_snps)
+  latent_continuous_values <- matrix(NA, nrow = n_samples, ncol = n_snps) # 初始化
+
+  if (n_snps > 0) {
+    tryCatch(
+      {
+        latent_continuous_values <- MASS::mvrnorm(n = n_samples, mu = mean_vector, Sigma = corr_matrix, tol = 1e-6)
+      },
+      error = function(e) {
+        stop(paste("从多元正态分布采样失败。相关矩阵可能不是正定的，或 mvrnorm 存在其他问题。原始错误:", e$message))
+      }
+    )
+    # 如果 n_samples 是 1, mvrnorm 返回一个向量，需转换为矩阵
+    if (n_samples == 1 && n_snps > 0 && is.vector(latent_continuous_values)) {
+      latent_continuous_values <- matrix(latent_continuous_values, nrow = 1)
+    }
+  }
+
+
+  # 4. 将连续值转换为基因型 (0, 1, 2)
+  genotypes <- matrix(0, nrow = n_samples, ncol = n_snps)
+
+  if (n_snps > 0) {
+    for (j in 1:n_snps) {
+      qj <- actual_mafs # 当前 SNP 的 MAF
+
+      # 根据 HWE 计算基因型频率
+      p_00 <- (1 - qj)^2 # 纯合主要等位基因 (基因型 0)
+      p_01 <- 2 * qj * (1 - qj) # 杂合子 (基因型 1)
+      # p_11 = qj^2 (纯合次要等位基因, 基因型 2)
+
+      if (qj == 0) { # 所有个体都是纯合主要等位基因 (基因型 0)
+        genotypes[, j] <- 0
+        next # 跳到下一个 SNP
+      }
+      if (qj == 1) { # 所有个体都是纯合次要等位基因 (基因型 2)
+        genotypes[, j] <- 2
+        next # 跳到下一个 SNP
+      }
+
+      # 从标准正态分布 N(0,1) 计算阈值
+      thresh1 <- qnorm(p_00)
+      thresh2 <- qnorm(p_00 + p_01) # 等同于 qnorm(1 - qj^2)
+
+      snp_latent_col <- latent_continuous_values[, j]
+      genotypes[snp_latent_col <= thresh1, j] <- 0
+      genotypes[snp_latent_col > thresh1 & snp_latent_col <= thresh2, j] <- 1
+      genotypes[snp_latent_col > thresh2, j] <- 2
+    }
+  }
+  return(genotypes)
+}
+
+# 一个样本的生成函数
+#' @param compatibility_selection_geno 可以取 "independent, equicorrelated ar1"
 generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_prop = 0,
                                           p_f = 0.3, p_m = 0.3,
                                           # Exposure Effects
@@ -13,7 +145,12 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
                                           beta_confounding_exp = 0.2, beta_confounding_out = 0.2,
                                           # Other parameters
                                           correlation = 0.2, seed = NULL,
-                                          N_children = 1,
+                                          # 选型婚配（基因）
+                                          compatibility_selection_geno = "independent",
+                                          correlation_param = 0.5,
+                                          # 选型婚配（环境）
+                                          compatibility_selection_factor_exp = 0,
+                                          compatibility_selection_factor_out = 0,
                                           sample.outcome.betas.from.range = FALSE) { # 默认关闭范围采样
 
   # --- 0. 设置随机种子 ---
@@ -62,10 +199,20 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
   }
 
   # --- 2. 为 *所有 N_total* 个体生成 SNP 数据 ---
-  Grandfather_Father_SNPs_all <- internal_generate_hwe_snps(N_total, p_f)
-  Grandmother_Father_SNPs_all <- internal_generate_hwe_snps(N_total, p_f)
-  Grandfather_Mother_SNPs_all <- internal_generate_hwe_snps(N_total, p_m)
-  Grandmother_Mother_SNPs_all <- internal_generate_hwe_snps(N_total, p_m)
+  Grand_Father_SNPs <- simulate_snps_r(
+    n_samples = N_total, n_snps = 2, mafs = p_f,
+    correlation_type = compatibility_selection_geno,
+    correlation_param = correlation_param
+  )
+  Grandfather_Father_SNPs_all <- Grand_Father_SNPs[, 1]
+  Grandmother_Father_SNPs_all <- Grand_Father_SNPs[, 2]
+  Grand_Mother_SNPs <- simulate_snps_r(
+    n_samples = N_total, n_snps = 2, mafs = p_m,
+    correlation_type = compatibility_selection_geno,
+    correlation_param = correlation_param
+  )
+  Grandfather_Mother_SNPs_all <- Grand_Mother_SNPs[, 1]
+  Grandmother_Mother_SNPs_all <- Grand_Mother_SNPs[, 2]
 
   allele_from_GF_F_all <- internal_get_transmitted_allele(Grandfather_Father_SNPs_all)
   allele_from_GM_F_all <- internal_get_transmitted_allele(Grandmother_Father_SNPs_all)
@@ -87,8 +234,14 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
   if (correlation != correlation_safe) {
     warning(paste0("Correlation ", correlation, "修正为 ", correlation_safe))
   }
+
+  # 家庭环境相关性
   correlation_factor_exp_all <- rnorm(N_total, mean = 0, sd = sqrt(correlation_safe))
   correlation_factor_out_all <- rnorm(N_total, mean = 0, sd = sqrt(correlation_safe))
+
+  # 选型婚配相关性
+  compatibility_selection_factor_exp <- rnorm(N_total, mean = 0, sd = sqrt(compatibility_selection_factor_exp))
+  compatibility_selection_factor_out <- rnorm(N_total, mean = 0, sd = sqrt(compatibility_selection_factor_out))
 
   # --- 4. 为 *所有 N_total* 个体生成暴露数据 (连续) ---
 
@@ -104,9 +257,9 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
   #' @param correlation_factor_all 相关性因子
   genrate_expose_function <- function(beta_StoE_exp, beta_FStoOE_exp, beta_MStoOE_exp,
                                       SNPs_all, SNPs_Father, SNPs_Mother,
-                                      beta_confounding_exp, Confounder_all, correlation_factor_all) {
+                                      beta_confounding_exp, Confounder_all, correlation_factor_all, compatibility_selection_factor) {
     results <- beta_StoE_exp * SNPs_all + beta_FStoOE_exp * SNPs_Father + beta_MStoOE_exp * SNPs_Mother +
-      beta_confounding_exp * Confounder_all + correlation_factor_all
+      beta_confounding_exp * Confounder_all + correlation_factor_all + compatibility_selection_factor
     var_results <- var(results, na.rm = TRUE)
     exp_err <- sqrt(max(0, 1 - var_results))
     expose_all <- results + rnorm(N_total, mean = 0, sd = exp_err)
@@ -116,27 +269,27 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
   Father_expose_all <- genrate_expose_function(
     beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp,
     Father_SNPs_all, Grandfather_Father_SNPs_all, Grandmother_Father_SNPs_all,
-    beta_confounding_exp, Confounder_exp_all, correlation_factor_exp_all
+    beta_confounding_exp, Confounder_exp_all, correlation_factor_exp_all, compatibility_selection_factor_exp
   )
   Mother_expose_all <- genrate_expose_function(
     beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp,
     Mother_SNPs_all, Grandfather_Mother_SNPs_all, Grandmother_Mother_SNPs_all,
-    beta_confounding_exp, Confounder_exp_all, correlation_factor_exp_all
+    beta_confounding_exp, Confounder_exp_all, correlation_factor_exp_all, compatibility_selection_factor_exp
   )
   Offspring_expose_all <- genrate_expose_function(
     beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp,
     Offspring_SNPs_all, Father_expose_all, Mother_expose_all,
-    beta_confounding_exp, Confounder_exp_all, correlation_factor_exp_all
+    beta_confounding_exp, Confounder_exp_all, correlation_factor_exp_all, 0
   )
 
   # --- 5. 为 *所有 N_total* 个体生成结局数据 (连续) ---
   genrate_outcome_function <- function(beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
                                        expose_all, SNPs_all, SNPs_Father, SNPs_Mother,
-                                       beta_confounding_out, Confounder_all, correlation_factor_all) {
+                                       beta_confounding_out, Confounder_all, correlation_factor_all, compatibility_selection_factor) {
     outcome_deterministic_all <- beta_exp_to_out * expose_all +
       beta_OStoOE_out * SNPs_all +
       beta_FStoOE_out * SNPs_Father + beta_MStoOE_out * SNPs_Mother +
-      beta_confounding_out * Confounder_all + correlation_factor_all
+      beta_confounding_out * Confounder_all + correlation_factor_all + compatibility_selection_factor
 
     var_results <- var(outcome_deterministic_all, na.rm = TRUE)
     exp_err <- sqrt(max(0, 1 - var_results))
@@ -147,17 +300,17 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
   Father_outcome_all <- genrate_outcome_function(
     beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
     Father_expose_all, Father_SNPs_all, Grandfather_Father_SNPs_all, Grandmother_Father_SNPs_all,
-    beta_confounding_out, Confounder_out_all, correlation_factor_out_all
+    beta_confounding_out, Confounder_out_all, correlation_factor_out_all, compatibility_selection_factor_out
   )
   Mother_outcome_all <- genrate_outcome_function(
     beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
     Mother_expose_all, Mother_SNPs_all, Grandfather_Mother_SNPs_all, Grandmother_Mother_SNPs_all,
-    beta_confounding_out, Confounder_out_all, correlation_factor_out_all
+    beta_confounding_out, Confounder_out_all, correlation_factor_out_all, compatibility_selection_factor_out
   )
   Offspring_outcome_all <- genrate_outcome_function(
     beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
     Offspring_expose_all, Offspring_SNPs_all, Father_SNPs_all, Mother_SNPs_all,
-    beta_confounding_out, Confounder_out_all, correlation_factor_out_all
+    beta_confounding_out, Confounder_out_all, correlation_factor_out_all, 0
   )
 
 
@@ -226,13 +379,8 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
 
 
 
-
-# 生成指定孩子的数量的函数
-
-
-
 # 3 种数据集类型生成函数 ----
-
+#' @param compatibility_selection_geno 可以取 "independent, equicorrelated ar1"
 generate_multiple_datasets_v3 <- function(
     n = 10, # 要生成的总数据集数量
     num_pleiotropic = 1, # 指定多少个数据集具有 *潜在的* 非零结局效应
@@ -248,7 +396,15 @@ generate_multiple_datasets_v3 <- function(
     # 父母基因型 -> 结局
     mean_beta_OStoOE_out = 0.1, sd_beta_OStoOE_out = 0.05, # 新增: 均值和标准差
     prop_negative_pleiotropy = 0.5, # 新增: 在多效性 SNP 中，效应为负的比例 (0 到 1)
-    # 注意: 这会反转均值的符号进行抽样
+    # 选型婚配
+    compatibility_selection_prop = 0, # 选型婚配在数据集中的比例
+    compatibility_selection_geno = "independent",
+    correlation_param = 0.5,
+    compatibility_selection_factor_exp = 0,
+    compatibility_selection_factor_out = 0,
+    # 人群分层
+    ## 定义人群分层的差异(次等位基因频率差异)
+    crowd_stratification_differences = 0, #两个人群
     # --- 其他效应 ---
     beta_exp_to_out = 0.4,
     beta_confounding_exp = 0.2,
@@ -302,12 +458,28 @@ generate_multiple_datasets_v3 <- function(
       # 确定非多效性 SNP 的标签
       snp_label <- "valid_instrument" # 有效工具变量
     }
+    # 选型婚配比例
+    is_compatibility_selection <- if (runif(1) < compatibility_selection_prop) 1 else 0
+    if (is_compatibility_selection == 1) {
+      current_compatibility_selection_geno <- compatibility_selection_geno
+      current_correlation_param <- correlation_param
+      current_compatibility_selection_factor_exp <- compatibility_selection_factor_exp
+      current_compatibility_selection_factor_out <- compatibility_selection_factor_out
+    } else {
+      current_compatibility_selection_geno <- "independent"
+      current_correlation_param <- 0
+      current_compatibility_selection_factor_exp <- 0
+      current_compatibility_selection_factor_out <- 0
+    }
 
+    # 人群分层
+    current_p_f <- sample(c(p_f, p_f + crowd_stratification_differences), 1)
+    current_p_m <- sample(c(p_m, p_m + crowd_stratification_differences), 1)
 
     # --- 3c. 调用底层函数生成单个数据集 ---
     data_i <- generate_mr_trio_data_2sample(
       N_exp = N_exp, N_out = N_out, overlap_prop = overlap_prop,
-      p_f = p_f, p_m = p_m,
+      p_f = current_p_f, p_m = current_p_m,
       beta_FStoOE_exp = current_beta_FStoOE_exp, beta_MStoOE_exp = current_beta_MStoOE_exp,
       beta_OStoOE_exp = current_beta_OStoOE_exp,
       # 传递当前循环抽样生成的或设为 0 的结局效应值
@@ -315,7 +487,12 @@ generate_multiple_datasets_v3 <- function(
       beta_OStoOE_out = current_beta_OStoOE_out,
       beta_exp_to_out = beta_exp_to_out,
       beta_confounding_exp = beta_confounding_exp, beta_confounding_out = beta_confounding_out,
-      correlation = correlation, seed = NULL
+      correlation = correlation, seed = NULL,
+      # 选型婚配参数
+      compatibility_selection_geno = current_compatibility_selection_geno,
+      correlation_param <- current_correlation_param,
+      compatibility_selection_factor_exp = current_compatibility_selection_factor_exp,
+      compatibility_selection_factor_out = current_compatibility_selection_factor_out
     )
 
     # --- 3d. 为生成的数据添加标识和类型标签 (使用上面确定的 snp_label) ---
@@ -364,5 +541,3 @@ generate_multiple_datasets_v3 <- function(
   # --- 5. 返回列表 ---
   return(list(combined_exposure_data, combined_outcome_data))
 }
-
-
