@@ -130,8 +130,7 @@ cMl_para <- function(
 
     return(c)
 }
-beta <- matrix(0)
-cMl_para_test(beta)
+
 
 # %%
 # 完整版的函数
@@ -311,7 +310,7 @@ cml_family_2_cn_cpp <- function(beta_x_hat, beta_y_hat, Sigma_inv_x, Sigma_inv_y
     return(final_output)
 }
 
-
+# 多起点函数
 cMl_para_multi_start_rcpp <- function(n_starts = 10,
                                       sd_theta_start = 0.001,
                                       sd_beta_x_start = 0.001,
@@ -576,7 +575,7 @@ cMl_para_multi_start_rcpp <- function(n_starts = 10,
     return(final_result) # 返回最终结果
 }
 
-
+# BIC 计算函数
 BIC_function_optimized <- function(
     theta, k_x, k_par, beta_x, beta_x_hat, Sigma_inv_x,
     beta_y_hat, Sigma_inv_y, n_eff, r) {
@@ -604,7 +603,7 @@ BIC_function_optimized <- function(
 
     # 计算复杂度惩罚项
     # 惩罚与多效性相关的自由参数数量 (k_x 和 k_par)
-    # 注意：理论上可能需要更复杂的参数计数，但这里遵循常见实践
+    # 这个惩罚可以调整很多
     penalty <- log(n_eff) * (k_x + k_par) * 1 / 2
 
     # 计算总 BIC
@@ -612,9 +611,3 @@ BIC_function_optimized <- function(
 
     return(as.numeric(BIC)) # 确保返回标量数值
 }
-# %%
-test <- function(...){
-    results <- list(...)
-    return(results)
-}
-test(a = 1)
