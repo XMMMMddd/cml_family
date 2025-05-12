@@ -1,10 +1,12 @@
+# %%
+# install.packages("RcppArmadillo")
+# install.packages("Rcpp")
 library(RcppArmadillo)
 library(Rcpp)
 
 # %%
 # cML的参数估计 CPP 版本
-sourceCpp("/Volumes/数据 1/cml 家庭项目/cml家庭/cml家庭函数/cML_para_rcpp.cpp")
-sourceCpp("/Volumes/数据 1/cml 家庭项目/cml家庭/cml家庭函数/cML_cpp.cpp")
+sourceCpp("cml家庭函数/cML_para_rcpp.cpp")
 # cMl的参数估计
 cMl_para <- function(
     k_par = 0, k_x = 0, beta_y_hat, beta_x_hat, Sigma_inv_x,
@@ -574,7 +576,6 @@ cMl_para_multi_start_rcpp <- function(n_starts = 10,
 
     return(final_result) # 返回最终结果
 }
-
 # BIC 计算函数
 BIC_function_optimized <- function(
     theta, k_x, k_par, beta_x, beta_x_hat, Sigma_inv_x,
