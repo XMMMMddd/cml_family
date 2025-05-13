@@ -225,7 +225,6 @@ fgwas_for_data_optimized <- function(data_df,
 fgwas_to_mr <- function(results_of_fgwas) {
   results_of_fgwas_beta <- matrix(results_of_fgwas$beta_hat, ncol = 2)[, 1]
   beta_se <- rep(0, length(results_of_fgwas_beta))
-  results_of_fgwas$Sigma_inv
   for (i in 1:length(results_of_fgwas_beta)) {
     current_sigma_i <- (2 * i - 1):(2 * i)
     current_sigma <- results_of_fgwas$Sigma_inv[current_sigma_i, ]
