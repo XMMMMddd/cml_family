@@ -268,37 +268,4 @@ triplet_family_simulation_once <- function(
     results$I_duration <- as.numeric(res_I_time_2 - res_I_time_1)
     return(results)
 }
-test_c <- triplet_family_simulation_once(
-    n = 10, num_pleiotropic = 0, N_out = 1000,
-    # 样本重叠
-    overlap_prop = 0,
-    # 直接效应
-    beta_FStoOE_exp = 0.3,
-    beta_MStoOE_exp = 0.3,
-    beta_OStoOE_exp = 0.3,
-    # 水平多效性
-    prop_negative_pleiotropy =
-        0, # 不满足inside假设
-    mean_beta_FStoOE_out = 0,
-    sd_beta_FStoOE_out = 0.05,
-    mean_beta_MStoOE_out = 0,
-    sd_beta_MStoOE_out = 0.05,
-    mean_beta_OStoOE_out = 0,
-    sd_beta_OStoOE_out = 0.05,
-    # 选型婚配
-    ## 选型婚配基因型
-    compatibility_selection_prop = 0,
-    compatibility_selection_geno = "independent", correlation_param = 0.5,
-    ## 选型婚配暴露相关
-    compatibility_selection_factor_exp = 0,
-    compatibility_selection_factor_out = 0,
-    # 人群分层（双人群差异）
-    crowd_stratification_differences = 0,
-    # 其他参数设置
-    beta_exp_to_out = 0,
-    beta_confounding_exp = 0.2,
-    beta_confounding_out = 0.2,
-    correlation = 0.2,
-    seed = NULL
-)
-View(test_c)
+

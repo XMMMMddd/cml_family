@@ -2,6 +2,8 @@
 # install.packages("doParallel")
 library(doParallel)
 library(purrr)
+# install.packages("here")
+library(here)
 source("MR 模拟/MR 模拟（单次）.R")
 
 # %% 模拟函数定义
@@ -136,43 +138,43 @@ simulation_ListtoTibble <- function(simulation_output_list) {
     }
 }
 # %% 小型模拟
-sim_params_list <- list( # --- 从列表解包参数 ---
-    n = 10, num_pleiotropic = 0, N_out = 1000,
-    # 样本重叠
-    overlap_prop = 0,
-    # 直接效应
-    beta_FStoOE_exp = 0.3,
-    beta_MStoOE_exp = 0.3,
-    beta_OStoOE_exp = 0.3,
-    # 水平多效性
-    prop_negative_pleiotropy =
-        0, # 不满足inside假设
-    mean_beta_FStoOE_out = 0,
-    sd_beta_FStoOE_out = 0.05,
-    mean_beta_MStoOE_out = 0,
-    sd_beta_MStoOE_out = 0.05,
-    mean_beta_OStoOE_out = 0,
-    sd_beta_OStoOE_out = 0.05,
-    # 选型婚配
-    ## 选型婚配基因型
-    compatibility_selection_prop = 0,
-    compatibility_selection_geno = "independent", correlation_param = 0.5,
-    ## 选型婚配暴露相关
-    compatibility_selection_factor_exp = 0,
-    compatibility_selection_factor_out = 0,
-    # 人群分层（双人群差异）
-    crowd_stratification_differences = 0,
-    # 其他参数设置
-    beta_exp_to_out = 0,
-    beta_confounding_exp = 0.2,
-    beta_confounding_out = 0.2,
-    correlation = 0.2,
-    seed = NULL
-)
-small_simulation <- simulation_cmlfamily_multsnps_cpp(500, sim_params_list)
+# sim_params_list <- list( # --- 从列表解包参数 ---
+#     n = 10, num_pleiotropic = 0, N_out = 1000,
+#     # 样本重叠
+#     overlap_prop = 0,
+#     # 直接效应
+#     beta_FStoOE_exp = 0.3,
+#     beta_MStoOE_exp = 0.3,
+#     beta_OStoOE_exp = 0.3,
+#     # 水平多效性
+#     prop_negative_pleiotropy =
+#         0, # 不满足inside假设
+#     mean_beta_FStoOE_out = 0,
+#     sd_beta_FStoOE_out = 0.05,
+#     mean_beta_MStoOE_out = 0,
+#     sd_beta_MStoOE_out = 0.05,
+#     mean_beta_OStoOE_out = 0,
+#     sd_beta_OStoOE_out = 0.05,
+#     # 选型婚配
+#     ## 选型婚配基因型
+#     compatibility_selection_prop = 0,
+#     compatibility_selection_geno = "independent", correlation_param = 0.5,
+#     ## 选型婚配暴露相关
+#     compatibility_selection_factor_exp = 0,
+#     compatibility_selection_factor_out = 0,
+#     # 人群分层（双人群差异）
+#     crowd_stratification_differences = 0,
+#     # 其他参数设置
+#     beta_exp_to_out = 0,
+#     beta_confounding_exp = 0.2,
+#     beta_confounding_out = 0.2,
+#     correlation = 0.2,
+#     seed = NULL
+# )
+# small_simulation <- simulation_cmlfamily_multsnps_cpp(500, sim_params_list)
 
-small_simulation_tibble <- simulation_ListtoTibble(small_simulation)
-write.csv2(as.data.frame(small_simulation_tibble$tibble), file = "MR 模拟/MR 模拟结果/基础测试.csv")
+# small_simulation_tibble <- simulation_ListtoTibble(small_simulation)
+# write.csv2(as.data.frame(small_simulation_tibble$tibble), file = "MR 模拟/MR 模拟结果/基础测试.csv")
 
 # %% 大型模拟
 
@@ -216,10 +218,103 @@ run_simulation_wrapper <- function(current_Violations_IVA, current_prop_negative
         correlation = 0.2,
         seed = NULL
     )
-    simulation_cmlfamily_multsnps_cpp(1, sim_params_list)
+    simulation_cmlfamily_multsnps_cpp(500, sim_params_list)
+}
+# 2. 定义输出目录的名称
+output_directory_name <- "MR 模拟/MR 模拟结果"
+
+# 3. 创建输出目录 (如果尚不存在)
+# 使用 here() 来确保路径相对于项目根目录是正确的
+if (!dir.exists(here(output_directory_name))) {
+    dir.create(here(output_directory_name), recursive = TRUE)
+    message(paste("已创建输出目录:", here(output_directory_name)))
+} else {
+    message(paste("输出目录已存在:", here(output_directory_name)))
 }
 
-# param_grid 的列名必须与 run_simulation_wrapper 函数的参数名匹配
-results_list_pmap <- pmap(param_grid, run_simulation_wrapper)
+# 4. 定义一个新的包装函数，用于运行模拟并保存结果
+run_and_save_simulation_csv <- function(current_Violations_IVA, current_prop_negative,
+                                        current_overlap, current_indirect, current_beta,
+                                        output_dir) {
+    # a. 根据参数生成唯一且描述性的文件名
+    # 为了文件名安全，替换特殊字符：将点(.)替换为'p'，负号(-)替换为'neg'
+    val_iva_str <- as.character(current_Violations_IVA)
+    val_prop_neg_str <- gsub("\\.", "p", as.character(current_prop_negative))
+    val_overlap_str <- gsub("\\.", "p", as.character(current_overlap))
+    val_indirect_str <- gsub("\\.", "p", as.character(current_indirect))
+    val_beta_str <- gsub("-", "neg", gsub("\\.", "p", as.character(current_beta)))
 
-# results_list_pmap 也会是一个包含所有模拟结果的列表
+    filename <- paste0(
+        "sim_IVA-", val_iva_str,
+        "_propNeg-", val_prop_neg_str,
+        "_overlap-", val_overlap_str,
+        "_indirect-", val_indirect_str,
+        "_beta-", val_beta_str,
+        ".csv"
+    )
+
+    filepath <- file.path(output_dir, filename)
+
+    # b. 运行原始的模拟包装函数
+    message(paste("正在运行参数组合:", filename)) # 打印当前运行的参数组合信息
+    simulation_result <- tryCatch(
+        {
+            run_simulation_wrapper(
+                current_Violations_IVA,
+                current_prop_negative,
+                current_overlap,
+                current_indirect,
+                current_beta
+            )
+        },
+        error = function(e) {
+            warning(paste("模拟运行失败:", filename, "错误信息:", e$message))
+            return(NULL) # 如果模拟失败，返回NULL
+        }
+    )
+
+    # c. 将结果保存到CSV文件
+    if (!is.null(simulation_result)) {
+        tryCatch(
+            {
+                write.csv(simulation_result, filepath, row.names = FALSE)
+                message(paste("结果已保存到:", filepath))
+                return(filepath) # 返回文件路径表示成功
+            },
+            error = function(e) {
+                warning(paste("保存CSV文件失败:", filepath, "错误信息:", e$message))
+                return(NULL) # 如果保存失败，返回NULL
+            }
+        )
+    } else {
+        return(NULL) # 如果模拟本身失败，也返回NULL
+    }
+}
+
+# 5. 使用 pmap 应用新的包装函数
+# pmap 会将 param_grid 的每一行作为参数传递给 run_and_save_simulation_csv 函数
+# output_dir 参数会作为附加的固定参数传递给函数
+message("开始批量运行模拟并保存结果...")
+list_of_created_files <- pmap(
+    .l = param_grid,
+    .f = run_and_save_simulation_csv,
+    output_dir = here(output_directory_name) # 将输出目录作为固定参数传递
+)
+message("所有模拟运行和保存操作已完成。")
+
+# 6. （可选）检查生成的文件列表或处理失败的情况
+# list_of_created_files 将包含成功保存的文件路径或NULL（如果失败）
+# 您可以检查这个列表来确认哪些成功了，哪些失败了
+successful_saves <- Filter(Negate(is.null), list_of_created_files)
+failed_saves_count <- length(list_of_created_files) - length(successful_saves)
+
+message(paste("成功保存的文件数量:", length(successful_saves)))
+if (failed_saves_count > 0) {
+    message(paste("失败的保存/模拟数量:", failed_saves_count))
+}
+
+# 您可以打印出前几个成功保存的文件名
+# print(head(successful_saves))
+
+
+

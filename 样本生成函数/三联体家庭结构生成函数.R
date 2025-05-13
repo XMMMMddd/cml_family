@@ -131,27 +131,28 @@ simulate_snps_r <- function(n_samples, n_snps, mafs = 0.1,
 
 # 一个样本的生成函数
 #' @param compatibility_selection_geno 可以取 "independent, equicorrelated ar1"
-generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_prop = 0,
-                                          p_f = 0.3, p_m = 0.3,
-                                          # Exposure Effects
-                                          beta_FStoOE_exp = 0.1, beta_MStoOE_exp = 0.1,
-                                          beta_OStoOE_exp = 0.3,
-                                          # Outcome Effects (Direct Pleiotropy / Dynastic)
-                                          beta_FStoOE_out = 0, beta_MStoOE_out = 0,
-                                          beta_OStoOE_out = 0,
-                                          # Causal Effect
-                                          beta_exp_to_out = 0.4,
-                                          # Confounding Effects
-                                          beta_confounding_exp = 0.2, beta_confounding_out = 0.2,
-                                          # Other parameters
-                                          correlation = 0.2, seed = NULL,
-                                          # 选型婚配（基因）
-                                          compatibility_selection_geno = "independent",
-                                          correlation_param = 0.5,
-                                          # 选型婚配（环境）
-                                          compatibility_selection_factor_exp = 0,
-                                          compatibility_selection_factor_out = 0,
-                                          sample.outcome.betas.from.range = FALSE) { # 默认关闭范围采样
+generate_mr_trio_data_2sample <- function(
+    N_exp = 1000, N_out = 1000, overlap_prop = 0,
+    p_f = 0.3, p_m = 0.3,
+    # Exposure Effects
+    beta_FStoOE_exp = 0.1, beta_MStoOE_exp = 0.1,
+    beta_OStoOE_exp = 0.3,
+    # Outcome Effects (Direct Pleiotropy / Dynastic)
+    beta_FStoOE_out = 0, beta_MStoOE_out = 0,
+    beta_OStoOE_out = 0,
+    # Causal Effect
+    beta_exp_to_out = 0.4,
+    # Confounding Effects
+    beta_confounding_exp = 0.2, beta_confounding_out = 0.2,
+    # Other parameters
+    correlation = 0.2, seed = NULL,
+    # 选型婚配（基因）
+    compatibility_selection_geno = "independent",
+    correlation_param = 0.5,
+    # 选型婚配（环境）
+    compatibility_selection_factor_exp = 0,
+    compatibility_selection_factor_out = 0,
+    sample.outcome.betas.from.range = FALSE) { # 默认关闭范围采样
 
   # --- 0. 设置随机种子 ---
   set.seed(seed)
@@ -258,8 +259,11 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
   genrate_expose_function <- function(beta_StoE_exp, beta_FStoOE_exp, beta_MStoOE_exp,
                                       SNPs_all, SNPs_Father, SNPs_Mother,
                                       beta_confounding_exp, Confounder_all, correlation_factor_all, compatibility_selection_factor) {
-    results <- beta_StoE_exp * SNPs_all + beta_FStoOE_exp * SNPs_Father + beta_MStoOE_exp * SNPs_Mother +
-      beta_confounding_exp * Confounder_all + correlation_factor_all + compatibility_selection_factor
+    results <- beta_StoE_exp * SNPs_all + # 自己的效应
+      beta_FStoOE_exp * SNPs_Father + # 来自父亲的效应
+      beta_MStoOE_exp * SNPs_Mother + # 来自母亲的效应
+      beta_confounding_exp * Confounder_all + correlation_factor_all +
+      compatibility_selection_factor
     var_results <- var(results, na.rm = TRUE)
     exp_err <- sqrt(max(0, 1 - var_results))
     expose_all <- results + rnorm(N_total, mean = 0, sd = exp_err)
@@ -269,12 +273,14 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
   Father_expose_all <- genrate_expose_function(
     beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp,
     Father_SNPs_all, Grandfather_Father_SNPs_all, Grandmother_Father_SNPs_all,
-    beta_confounding_exp, Confounder_exp_all, correlation_factor_exp_all, compatibility_selection_factor_exp
+    beta_confounding_exp, Confounder_exp_all,
+    correlation_factor_exp_all, compatibility_selection_factor_exp
   )
   Mother_expose_all <- genrate_expose_function(
     beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp,
     Mother_SNPs_all, Grandfather_Mother_SNPs_all, Grandmother_Mother_SNPs_all,
-    beta_confounding_exp, Confounder_exp_all, correlation_factor_exp_all, compatibility_selection_factor_exp
+    beta_confounding_exp, Confounder_exp_all,
+    correlation_factor_exp_all, compatibility_selection_factor_exp
   )
   Offspring_expose_all <- genrate_expose_function(
     beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp,
@@ -285,7 +291,8 @@ generate_mr_trio_data_2sample <- function(N_exp = 1000, N_out = 1000, overlap_pr
   # --- 5. 为 *所有 N_total* 个体生成结局数据 (连续) ---
   genrate_outcome_function <- function(beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
                                        expose_all, SNPs_all, SNPs_Father, SNPs_Mother,
-                                       beta_confounding_out, Confounder_all, correlation_factor_all, compatibility_selection_factor) {
+                                       beta_confounding_out, Confounder_all,
+                                       correlation_factor_all, compatibility_selection_factor) {
     outcome_deterministic_all <- beta_exp_to_out * expose_all +
       beta_OStoOE_out * SNPs_all +
       beta_FStoOE_out * SNPs_Father + beta_MStoOE_out * SNPs_Mother +
@@ -404,7 +411,7 @@ generate_multiple_datasets_v3 <- function(
     compatibility_selection_factor_out = 0,
     # 人群分层
     ## 定义人群分层的差异(次等位基因频率差异)
-    crowd_stratification_differences = 0, #两个人群
+    crowd_stratification_differences = 0, # 两个人群
     # --- 其他效应 ---
     beta_exp_to_out = 0.4,
     beta_confounding_exp = 0.2,
@@ -478,21 +485,27 @@ generate_multiple_datasets_v3 <- function(
 
     # --- 3c. 调用底层函数生成单个数据集 ---
     data_i <- generate_mr_trio_data_2sample(
-      N_exp = N_exp, N_out = N_out, overlap_prop = overlap_prop,
+      N_exp = N_exp, N_out = N_out,
+      overlap_prop = overlap_prop,
       p_f = current_p_f, p_m = current_p_m,
-      beta_FStoOE_exp = current_beta_FStoOE_exp, beta_MStoOE_exp = current_beta_MStoOE_exp,
+      beta_FStoOE_exp = current_beta_FStoOE_exp,
+      beta_MStoOE_exp = current_beta_MStoOE_exp,
       beta_OStoOE_exp = current_beta_OStoOE_exp,
       # 传递当前循环抽样生成的或设为 0 的结局效应值
-      beta_FStoOE_out = current_beta_FStoOE_out, beta_MStoOE_out = current_beta_MStoOE_out,
+      beta_FStoOE_out = current_beta_FStoOE_out,
+      beta_MStoOE_out = current_beta_MStoOE_out,
       beta_OStoOE_out = current_beta_OStoOE_out,
       beta_exp_to_out = beta_exp_to_out,
-      beta_confounding_exp = beta_confounding_exp, beta_confounding_out = beta_confounding_out,
+      beta_confounding_exp = beta_confounding_exp,
+      beta_confounding_out = beta_confounding_out,
       correlation = correlation, seed = NULL,
       # 选型婚配参数
       compatibility_selection_geno = current_compatibility_selection_geno,
       correlation_param <- current_correlation_param,
-      compatibility_selection_factor_exp = current_compatibility_selection_factor_exp,
-      compatibility_selection_factor_out = current_compatibility_selection_factor_out
+      compatibility_selection_factor_exp =
+        current_compatibility_selection_factor_exp,
+      compatibility_selection_factor_out =
+        current_compatibility_selection_factor_out
     )
 
     # --- 3d. 为生成的数据添加标识和类型标签 (使用上面确定的 snp_label) ---

@@ -228,7 +228,7 @@ fgwas_to_mr <- function(results_of_fgwas) {
   for (i in 1:length(results_of_fgwas_beta)) {
     current_sigma_i <- (2 * i - 1):(2 * i)
     current_sigma <- results_of_fgwas$Sigma_inv[current_sigma_i, ]
-    beta_se[i] <- solve(current_sigma)[1, 1]
+    beta_se[i] <- sqrt(solve(current_sigma)[1, 1])
   }
   return(list(results_of_fgwas_beta = results_of_fgwas_beta, beta_se = beta_se))
 }
