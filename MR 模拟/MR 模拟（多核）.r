@@ -218,7 +218,9 @@ run_simulation_wrapper <- function(current_Violations_IVA, current_prop_negative
         correlation = 0.2,
         seed = NULL
     )
-    simulation_cmlfamily_multsnps_cpp(500, sim_params_list)
+    results <- simulation_cmlfamily_multsnps_cpp(500, sim_params_list)
+    small_simulation_tibble <- simulation_ListtoTibble(results)$tibble
+    return(small_simulation_tibble)
 }
 # 2. 定义输出目录的名称
 output_directory_name <- "MR 模拟/MR 模拟结果"
@@ -315,6 +317,3 @@ if (failed_saves_count > 0) {
 
 # 您可以打印出前几个成功保存的文件名
 # print(head(successful_saves))
-
-
-
