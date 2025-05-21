@@ -19,8 +19,8 @@ library(MRBEE) # 暂时没用到
 # %%
 source("样本生成函数/三联体家庭结构生成函数.R") # 加载数据生成函数 library(dplyr) library(MASS) 里面加载了这些包
 source("FGWAS 优化版本/FGWAS 函数.R") # 加载 FGWAS 函数1
-source("cml家庭函数/cml_friamly.r") # library(RcppArmadillo) library(Rcpp)
-source("cml家庭函数/cml_oracle.r")
+source("cml家庭函数/cml家庭函数一代/cml_friamly.r") # library(RcppArmadillo) library(Rcpp)
+source("cml家庭函数/cml家庭函数一代/cml_oracle.r")
 # %%
 ## 计算se和估计值的函数
 calculate_mr_stats <- function(estimate, se) {
@@ -47,12 +47,8 @@ triplet_family_simulation_once <- function(
     mean_beta_MStoOE_out = 0, sd_beta_MStoOE_out = 0.05,
     mean_beta_OStoOE_out = 0, sd_beta_OStoOE_out = 0.05,
     # 选型婚配
-    ## 选型婚配基因型
-    compatibility_selection_prop = 0,
-    compatibility_selection_geno = "independent", correlation_param = 0.5,
-    ## 选型婚配暴露相关
-    compatibility_selection_factor_exp = 0,
-    compatibility_selection_factor_out = 0,
+    assortative_mating_prob = 0, # 选型婚配比例
+    assortative_mating_strength = 1000, # 选型婚配强度
     # 人群分层（双人群差异）
     crowd_stratification_differences = 0,
     # 其他参数设置
@@ -92,13 +88,8 @@ triplet_family_simulation_once <- function(
         mean_beta_OStoOE_out = mean_beta_OStoOE_out,
         sd_beta_OStoOE_out = sd_beta_OStoOE_out,
         # 选型婚配
-        ## 选型婚配基因型
-        compatibility_selection_prop = compatibility_selection_prop,
-        compatibility_selection_geno = compatibility_selection_geno,
-        correlation_param = correlation_param,
-        ## 选型婚配暴露
-        compatibility_selection_factor_exp = compatibility_selection_factor_exp,
-        compatibility_selection_factor_out = compatibility_selection_factor_out,
+        assortative_mating_prob = assortative_mating_prob, # 选型婚配比例
+        assortative_mating_strength = assortative_mating_strength, # 选型婚配强度
         # 人群分层（双人群差异）
         crowd_stratification_differences = crowd_stratification_differences,
         # 其他参数设置
