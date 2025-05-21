@@ -27,26 +27,12 @@ cml_family_ver_2 <- function(
     maximum_number_of_iterations = 1000,
     illegal_snps = 0, initial_alpha = 1) {
     # --- 1. 初始化参数 ---
-    # "非法" SNPs (被识别为具有多效性的SNPs) 的数量。
-    # 注意：在当前函数逻辑中，illegal_snps 初始化为 0 并且在后续代码中没有被修改。
-    # 这意味着基于 illegal_snps > 0 条件的 r_snp_new 更新部分实际上不会执行，
-    # r_snp_new 将始终是一个零矩阵，除非修改 illegal_snps 的更新逻辑。
-    illegal_snps <- 0
 
-    # SNP 的数量。从暴露的 beta 估计矩阵的行数获取。
-    # 注意：原始代码是 nrow(data_summary_exp$beta_hat)，这里修改为直接使用函数参数 beta_hat_exp,
-    # 因为 data_summary_exp 不是函数的参数。
-    if (!is.matrix(beta_hat_exp) && !is.data.frame(beta_hat_exp)) {
-        stop("错误: beta_hat_exp 必须是一个矩阵或数据框。")
-    }
     snp_number <- nrow(beta_hat_exp)
 
     # 初始化因果效应 alpha (α)
     alpha <- 0
 
-    # 初始化用于存储每个 SNP 多效性效应 (r) 的矩阵。
-    # 每行对应一个 SNP，有 2 列 (可能对应 beta 的两个分量)。
-    # 初始为零，表示最初假设没有多效性效应。
     r_snp <- matrix(rep(0, 2 * snp_number), ncol = 2)
 
     # 暴露 beta 的初始估计值，使用传入的观测值。该值将在迭代中更新。
@@ -169,7 +155,8 @@ cml_family_ver_2 <- function(
 
 model_cml <- cml_multi_start_optimization_ver_2(
     beta_hat_exp, beta_hat_out,
-    beta_sigma_exp, beta_sigma_out
+    beta_sigma_exp, beta_sigma_out,
+    illegal_snps = 1
 )
 model_cml <- model_cml$selected_model_result
 # %%
@@ -209,12 +196,12 @@ cml_multi_start_optimization_ver_2 <- function(
         model_results[[i]] <- cml_family_ver_2_rcpp(
             beta_hat_exp = beta_hat_exp,
             beta_hat_out = beta_hat_out,
-            beta_sigma_exp_stack = beta_sigma_exp, # 传递给Rcpp的参数
-            beta_sigma_out_stack = beta_sigma_out, # 传递给Rcpp的参数
+            beta_sigma_exp = beta_sigma_exp, # 传递给Rcpp的参数
+            beta_sigma_out = beta_sigma_out, # 传递给Rcpp的参数
             initial_alpha = initial_alphas_used[i],
             permissible_error = permissible_error,
             maximum_number_of_iterations = maximum_number_of_iterations,
-            illegal_snps_arg = illegal_snps # 将R函数的illegal_snps传递给Rcpp
+            illegal_snps = illegal_snps # 将R函数的illegal_snps传递给Rcpp
         )
     }
 
@@ -331,10 +318,13 @@ bic_calculate <- function(
     beta_hat_out,
     beta_sigma_exp,
     beta_sigma_out,
-    penalty_factor = 0.5) {
+    penalty_factor = 0.5,
+    n_eff) {
     n_snps <- nrow(beta_hat_out)
     bic_term1 <- 0
     bic_term2 <- 0
+    r_snp <- model_cml$r_snp
+    k_snp <- sum((r_snp[, 1] != 0) == TRUE)
     # 计算拟合优度项 (与 -2 * logLikelihood 相关)
     for (i in 1:n_snps) {
         current_index <- (2 * i - 1):(2 * i)
@@ -372,10 +362,15 @@ variance_calculation_function <- function(
     model_cml, beta_hat_out,
     beta_sigma_exp, beta_sigma_out) {
     snp_number <- nrow(beta_hat_out)
+    k_c_snp_list <- 1:nrow(model_cml$r_snp)
+    k_c_snp_list <- setdiff(k_c_snp_list, which(model_cml$r_snp[, 1] != 0))
+    snp_number_valid <- length(k_c_snp_list)
     h_alpha_alpha <- matrix(0, ncol = 1, nrow = 1)
-    h_alpha_gamma <- matrix(0, ncol = 1, nrow = 2 * snp_number)
-    h_gamma_gamma <- matrix(0, ncol = 2 * snp_number, nrow = 2 * snp_number)
-    for (i in 1:snp_number) {
+    h_alpha_gamma <- matrix(0, ncol = 1, nrow = 2 * snp_number_valid)
+    h_gamma_gamma <- matrix(0, ncol = 2 * snp_number_valid, nrow = 2 * snp_number_valid)
+    for (j in 1:length(k_c_snp_list)) {
+        i <- k_c_snp_list[j]
+        current_index_h <- (2 * j - 1):(2 * j)
         current_index <- (2 * i - 1):(2 * i)
         current_beta_hat_out <- beta_hat_out[i, ]
         current_beta_exp <- model_cml$beta_exp[i, ]
@@ -392,18 +387,18 @@ variance_calculation_function <- function(
         h_alpha_gamma_i <- current_beta_sigma_out %*%
             (2 * alpha * current_beta_exp -
                 (current_beta_hat_out - current_r_snp))
-        h_alpha_gamma[current_index] <- h_alpha_gamma_i
+        h_alpha_gamma[current_index_h] <- h_alpha_gamma_i
 
         # 右下角对角矩阵
         h_gamma_gamma_i <- current_beta_sigma_exp +
             as.numeric(alpha^2) * current_beta_sigma_out
-        h_gamma_gamma[current_index, current_index] <- h_gamma_gamma_i
+        h_gamma_gamma[current_index_h, current_index_h] <- h_gamma_gamma_i
     }
-    h <- matrix(0, ncol = 2 * snp_number + 1, nrow = 2 * snp_number + 1)
+    h <- matrix(0, ncol = 2 * snp_number_valid + 1, nrow = 2 * snp_number_valid + 1)
     h[1, 1] <- h_alpha_alpha
-    h[2:(2 * snp_number + 1), 1] <- h_alpha_gamma
-    h[1, 2:(2 * snp_number + 1)] <- t(h_alpha_gamma)
-    h[2:(2 * snp_number + 1), 2:(2 * snp_number + 1)] <- h_gamma_gamma
+    h[2:(2 * snp_number_valid + 1), 1] <- h_alpha_gamma
+    h[1, 2:(2 * snp_number_valid + 1)] <- t(h_alpha_gamma)
+    h[2:(2 * snp_number_valid + 1), 2:(2 * snp_number_valid + 1)] <- h_gamma_gamma
     sd_alpha <- sqrt(solve(h)[1, 1])
     return(sd_alpha)
 }
@@ -417,13 +412,13 @@ cml_family_ver_2_cpp <- function(
     permissible_error = 1e-7, # 更明确的默认容许误差
     maximum_number_of_iterations = 1000,
     number_of_attempts = 5,
-    consensus_proportion = 0.5) {
+    consensus_proportion = 0.5, n_eff = 1000) {
     snp_number <- nrow(beta_hat_exp)
     bic_score <- data.frame(
-        k_snp = 0:snp_number,
-        bic = rep(0, snp_number + 1),
-        alpha = rep(0, snp_number + 1),
-        alpha_sd = rep(0, snp_number + 1)
+        k_snp = 0:(snp_number - 1),
+        bic = rep(0, snp_number),
+        alpha = rep(0, snp_number),
+        alpha_sd = rep(0, snp_number)
     )
     for (i in 1:nrow(bic_score)) {
         current_model <- cml_multi_start_optimization_ver_2(
@@ -441,7 +436,34 @@ cml_family_ver_2_cpp <- function(
             beta_hat_out,
             beta_sigma_exp,
             beta_sigma_out,
-            penalty_factor = 0.5
+            penalty_factor = 0.5,
+            n_eff = n_eff
         )
+        alpha_var <- variance_calculation_function(
+            current_model$selected_model_result, beta_hat_out,
+            beta_sigma_exp, beta_sigma_out
+        )
+        bic_score$bic[i] <- current_bic
+        bic_score$alpha[i] <- current_model$selected_model_result$alpha
+        bic_score$alpha_sd[i] <- alpha_var
     }
+    best_model_index <- arrange(bic_score, bic)[1, 1]
+    best_model <- cml_multi_start_optimization_ver_2(
+        beta_hat_exp, beta_hat_out,
+        beta_sigma_exp, beta_sigma_out,
+        permissible_error = permissible_error,
+        maximum_number_of_iterations = maximum_number_of_iterations,
+        number_of_attempts = number_of_attempts,
+        consensus_proportion = consensus_proportion,
+        illegal_snps = best_model_index
+    )
+    # 1. 计算原始权重
+    # 权重公式为 exp(-bic/2)
+    raw_weights <- exp(-bic_score$bic / 2)
+    # 2. 计算 BIC 加权的 alpha
+    bic_weighted_alpha <- weighted.mean(bic_score$alpha, raw_weights, na.rm = TRUE)
+    # 3. 计算 BIC 加权的 alpha_sd (或 alpha_ad，取决于你的列名)
+    bic_weighted_alpha_sd <- weighted.mean(bic_score$alpha_sd, raw_weights, na.rm = TRUE)
+    results <- list(bic_weighted_alpha, bic_weighted_alpha_sd, best_model)
+    return(results)
 }
