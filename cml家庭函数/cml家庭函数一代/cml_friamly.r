@@ -6,7 +6,7 @@ library(Rcpp)
 
 # %%
 # cML的参数估计 CPP 版本
-sourceCpp("cml家庭函数/cML_para_rcpp.cpp")
+sourceCpp("cml家庭函数/cml家庭函数一代/cML_para_rcpp.cpp")
 # cMl的参数估计
 cMl_para <- function(
     k_par = 0, k_x = 0, beta_y_hat, beta_x_hat, Sigma_inv_x,

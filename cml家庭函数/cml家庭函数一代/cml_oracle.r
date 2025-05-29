@@ -1,4 +1,4 @@
-orcacle_function <- function(beta_x_hat, Sigma_inv_x, beta_y_hat, Sigma_inv_y) {
+oracle_function <- function(beta_x_hat, Sigma_inv_x, beta_y_hat, Sigma_inv_y) {
     # beta_y_hat
     fenzi <- 0
     fenmu <- 0

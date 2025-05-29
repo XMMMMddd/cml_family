@@ -1,22 +1,7 @@
 # %%
-source("样本生成函数/三联体家庭结构生成函数.R")
-source("FGWAS 优化版本/FGWAS 函数.R") # 加载 FGWAS 函数1
 library(RcppArmadillo)
 library(Rcpp)
 sourceCpp("cml家庭函数/cml家庭函数二代/cml_family_rcpp.cpp")
-
-
-# %%
-# 函数的输入
-data <- generate_multiple_datasets_v3(n = 3, num_pleiotropic = 0)
-data_summary_exp <- fgwas_for_data_optimized(data[[1]])
-data_summary_out <- fgwas_for_data_optimized(data[[2]])
-# %%
-# 定义初始值以及定义迭代需要使用的变量
-beta_hat_exp <- data_summary_exp$beta_hat
-beta_hat_out <- data_summary_out$beta_hat
-beta_sigma_exp <- data_summary_exp$Sigma_inv
-beta_sigma_out <- data_summary_out$Sigma_inv
 
 
 # %%
@@ -150,17 +135,6 @@ cml_family_ver_2 <- function(
 
     return(results)
 }
-
-# %%
-
-model_cml <- cml_multi_start_optimization_ver_2(
-    beta_hat_exp, beta_hat_out,
-    beta_sigma_exp, beta_sigma_out,
-    illegal_snps = 1
-)
-model_cml <- model_cml$selected_model_result
-# %%
-
 
 # %%
 cml_multi_start_optimization_ver_2 <- function(
@@ -430,6 +404,14 @@ cml_family_ver_2_cpp <- function(
             consensus_proportion = consensus_proportion,
             illegal_snps = bic_score$k_snp[i]
         )
+        # 加入收敛失败防爆
+
+        if (all(current_model$all_convergence_status) == FALSE) {
+            bic_score$bic[i] <- Inf
+            bic_score$alpha[i] <- 0
+            bic_score$alpha_sd[i] <- 10
+            next()
+        }
         current_bic <- bic_calculate(
             current_model$selected_model_result,
             beta_hat_exp,
@@ -467,3 +449,7 @@ cml_family_ver_2_cpp <- function(
     results <- list(bic_weighted_alpha, bic_weighted_alpha_sd, best_model)
     return(results)
 }
+
+
+
+

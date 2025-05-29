@@ -1,7 +1,10 @@
 # %%
+# renv::deactivate()
 # install.packages("doParallel")
 library(doParallel)
 library(purrr)
+# install.packages("progress")
+library(progress)
 # install.packages("here")
 library(here)
 source("MR 模拟/MR 模拟（单次）.R")
@@ -18,7 +21,6 @@ simulation_cmlfamily_multsnps_cpp <- function(
         source("MR 模拟/MR 模拟（单次）.R")
     })
 
-
     # 并行化计算
     results <- parLapply(
         cl = cluster, # 使用命名参数 cl
@@ -27,7 +29,7 @@ simulation_cmlfamily_multsnps_cpp <- function(
         fun = function(sim_index, sim_params_list) {
             # 第一个参数 sim_index 接收迭代序号，但后面不用它
             # 调用内部模拟函数
-            triplet_family_simulation_once(
+            triplet_family_simulation_once_robust_mr(
                 # --- 从列表解包参数 ---
                 n = sim_params_list$n,
                 num_pleiotropic = sim_params_list$num_pleiotropic,
@@ -48,17 +50,10 @@ simulation_cmlfamily_multsnps_cpp <- function(
                 mean_beta_OStoOE_out = sim_params_list$mean_beta_OStoOE_out,
                 sd_beta_OStoOE_out = sim_params_list$sd_beta_OStoOE_out,
                 # 选型婚配
-                ## 选型婚配基因型
-                compatibility_selection_prop =
-                    sim_params_list$compatibility_selection_prop,
-                compatibility_selection_geno =
-                    sim_params_list$compatibility_selection_geno,
-                correlation_param = sim_params_list$correlation_param,
-                ## 选型婚配暴露相关
-                compatibility_selection_factor_exp =
-                    sim_params_list$compatibility_selection_factor_exp,
-                compatibility_selection_factor_out =
-                    sim_params_list$compatibility_selection_factor_out,
+                assortative_mating_prob =
+                    sim_params_list$assortative_mating_prob, # 选型婚配比例
+                assortative_mating_strength =
+                    sim_params_list$assortative_mating_strength, # 选型婚配强度
                 # 人群分层（双人群差异）
                 crowd_stratification_differences =
                     sim_params_list$crowd_stratification_differences,
@@ -137,183 +132,183 @@ simulation_ListtoTibble <- function(simulation_output_list) {
         return(list(tibble = tibble::as_tibble(result_df), n_valid = n_valid))
     }
 }
-# %% 小型模拟
-# sim_params_list <- list( # --- 从列表解包参数 ---
-#     n = 10, num_pleiotropic = 0, N_out = 1000,
-#     # 样本重叠
-#     overlap_prop = 0,
-#     # 直接效应
-#     beta_FStoOE_exp = 0.3,
-#     beta_MStoOE_exp = 0.3,
-#     beta_OStoOE_exp = 0.3,
-#     # 水平多效性
-#     prop_negative_pleiotropy =
-#         0, # 不满足inside假设
-#     mean_beta_FStoOE_out = 0,
-#     sd_beta_FStoOE_out = 0.05,
-#     mean_beta_MStoOE_out = 0,
-#     sd_beta_MStoOE_out = 0.05,
-#     mean_beta_OStoOE_out = 0,
-#     sd_beta_OStoOE_out = 0.05,
-#     # 选型婚配
-#     ## 选型婚配基因型
-#     compatibility_selection_prop = 0,
-#     compatibility_selection_geno = "independent", correlation_param = 0.5,
-#     ## 选型婚配暴露相关
-#     compatibility_selection_factor_exp = 0,
-#     compatibility_selection_factor_out = 0,
-#     # 人群分层（双人群差异）
-#     crowd_stratification_differences = 0,
-#     # 其他参数设置
-#     beta_exp_to_out = 0,
-#     beta_confounding_exp = 0.2,
-#     beta_confounding_out = 0.2,
-#     correlation = 0.2,
-#     seed = NULL
-# )
-# small_simulation <- simulation_cmlfamily_multsnps_cpp(500, sim_params_list)
 
-# small_simulation_tibble <- simulation_ListtoTibble(small_simulation)
-# write.csv2(as.data.frame(small_simulation_tibble$tibble), file = "MR 模拟/MR 模拟结果/基础测试.csv")
+
+# %% 小型模拟
+sim_params_list <- list( # --- 从列表解包参数 ---
+    n = 10, num_pleiotropic = 0, N_out = 1000,
+    # 样本重叠
+    overlap_prop = 0,
+    # 直接效应
+    beta_FStoOE_exp = 0.3,
+    beta_MStoOE_exp = 0.3,
+    beta_OStoOE_exp = 0.3,
+    # 水平多效性
+    prop_negative_pleiotropy =
+        0, # 不满足inside假设
+    mean_beta_FStoOE_out = 0,
+    sd_beta_FStoOE_out = 0.05,
+    mean_beta_MStoOE_out = 0,
+    sd_beta_MStoOE_out = 0.05,
+    mean_beta_OStoOE_out = 0,
+    sd_beta_OStoOE_out = 0.05,
+    # 选型婚配
+    assortative_mating_prob = 0.999, # 选型婚配比例
+    assortative_mating_strength = 0.1, # 选型婚配强度
+    # 人群分层（双人群差异）
+    crowd_stratification_differences = 0,
+    # 其他参数设置
+    beta_exp_to_out = -0.15,
+    beta_confounding_exp = 0.2,
+    beta_confounding_out = 0.2,
+    correlation = 0.2,
+    seed = NULL
+)
+small_simulation <- simulation_cmlfamily_multsnps_cpp(10, sim_params_list)
+
+small_simulation_tibble <- simulation_ListtoTibble(small_simulation)
+write.csv2(as.data.frame(small_simulation_tibble$tibble),
+    file = "MR 模拟/MR 模拟结果/cml_family_ver2的模拟结果/基础测试.csv"
+)
 
 # %% 大型模拟
 
-beta_true_values <- c(-0.15, -0.10, -0.05, 0, 0.15, 0.10, 0.05)
-indirectGeneticEffect_values <- c(0, 0.1)
-sampleOverlapParameter_values <- c(0, 0.3, 0.7)
-iNSIDEAssumption_index_values <- c(0, 0.5) # Represents prop_negative_pleiotropy
-Violations_IVA <- c(0, 1, 3)
-
-# 构建一个笛卡尔集合
-param_grid <- expand.grid(
-    current_Violations_IVA = Violations_IVA,
-    current_prop_negative = iNSIDEAssumption_index_values,
-    current_overlap = sampleOverlapParameter_values,
-    current_indirect = indirectGeneticEffect_values,
-    current_beta = beta_true_values,
-    stringsAsFactors = FALSE # 通常建议，避免字符转因子
-)
-
-run_simulation_wrapper <- function(current_Violations_IVA, current_prop_negative,
-                                   current_overlap, current_indirect, current_beta) {
-    sim_params_list <- list(
-        n = 10, num_pleiotropic = current_Violations_IVA, N_out = 4000,
-        overlap_prop = current_overlap,
-        beta_FStoOE_exp = 0.3, beta_MStoOE_exp = 0.3, beta_OStoOE_exp = 0.3,
-        prop_negative_pleiotropy = current_prop_negative,
-        mean_beta_FStoOE_out = current_indirect,
-        sd_beta_FStoOE_out = 0.05,
-        mean_beta_MStoOE_out = current_indirect,
-        sd_beta_MStoOE_out = 0.05,
-        mean_beta_OStoOE_out = current_indirect,
-        sd_beta_OStoOE_out = 0.05,
-        compatibility_selection_prop = 0,
-        compatibility_selection_geno = "independent", correlation_param = 0.5,
-        compatibility_selection_factor_exp = 0,
-        compatibility_selection_factor_out = 0,
-        crowd_stratification_differences = 0,
-        beta_exp_to_out = current_beta,
-        beta_confounding_exp = 0.2,
-        beta_confounding_out = 0.2,
-        correlation = 0.2,
-        seed = NULL
-    )
-    results <- simulation_cmlfamily_multsnps_cpp(500, sim_params_list)
-    small_simulation_tibble <- simulation_ListtoTibble(results)$tibble
-    return(small_simulation_tibble)
-}
-# 2. 定义输出目录的名称
-output_directory_name <- "MR 模拟/MR 模拟结果"
-
-# 3. 创建输出目录 (如果尚不存在)
-# 使用 here() 来确保路径相对于项目根目录是正确的
-if (!dir.exists(here(output_directory_name))) {
-    dir.create(here(output_directory_name), recursive = TRUE)
-    message(paste("已创建输出目录:", here(output_directory_name)))
-} else {
-    message(paste("输出目录已存在:", here(output_directory_name)))
-}
-
-# 4. 定义一个新的包装函数，用于运行模拟并保存结果
-run_and_save_simulation_csv <- function(current_Violations_IVA, current_prop_negative,
-                                        current_overlap, current_indirect, current_beta,
-                                        output_dir) {
-    # a. 根据参数生成唯一且描述性的文件名
-    # 为了文件名安全，替换特殊字符：将点(.)替换为'p'，负号(-)替换为'neg'
-    val_iva_str <- as.character(current_Violations_IVA)
-    val_prop_neg_str <- gsub("\\.", "p", as.character(current_prop_negative))
-    val_overlap_str <- gsub("\\.", "p", as.character(current_overlap))
-    val_indirect_str <- gsub("\\.", "p", as.character(current_indirect))
-    val_beta_str <- gsub("-", "neg", gsub("\\.", "p", as.character(current_beta)))
-
-    filename <- paste0(
-        "sim_IVA-", val_iva_str,
-        "_propNeg-", val_prop_neg_str,
-        "_overlap-", val_overlap_str,
-        "_indirect-", val_indirect_str,
-        "_beta-", val_beta_str,
-        ".csv"
-    )
-
-    filepath <- file.path(output_dir, filename)
-
-    # b. 运行原始的模拟包装函数
-    message(paste("正在运行参数组合:", filename)) # 打印当前运行的参数组合信息
-    simulation_result <- tryCatch(
-        {
-            run_simulation_wrapper(
-                current_Violations_IVA,
-                current_prop_negative,
-                current_overlap,
-                current_indirect,
-                current_beta
-            )
-        },
-        error = function(e) {
-            warning(paste("模拟运行失败:", filename, "错误信息:", e$message))
-            return(NULL) # 如果模拟失败，返回NULL
-        }
-    )
-
-    # c. 将结果保存到CSV文件
-    if (!is.null(simulation_result)) {
-        tryCatch(
-            {
-                write.csv(simulation_result, filepath, row.names = FALSE)
-                message(paste("结果已保存到:", filepath))
-                return(filepath) # 返回文件路径表示成功
-            },
-            error = function(e) {
-                warning(paste("保存CSV文件失败:", filepath, "错误信息:", e$message))
-                return(NULL) # 如果保存失败，返回NULL
-            }
-        )
-    } else {
-        return(NULL) # 如果模拟本身失败，也返回NULL
+run_simulations_with_fancy_pb <- function(
+    n_simulations_per_combination = 10, # pb for progress bar
+    csv_file_base_address, # CSV文件存储的基础路径
+    change_parameters, # 包含参数变化的列表
+    base_parameters # 包含基础参数的列表
+    ) {
+    # 确保 progress 包已加载
+    if (!requireNamespace("progress", quietly = TRUE)) {
+        stop("Package 'progress' is needed for this function to work. Please install it.", call. = FALSE)
     }
-}
 
-# 5. 使用 pmap 应用新的包装函数
-# pmap 会将 param_grid 的每一行作为参数传递给 run_and_save_simulation_csv 函数
-# output_dir 参数会作为附加的固定参数传递给函数
-message("开始批量运行模拟并保存结果...")
-list_of_created_files <- pmap(
-    .l = param_grid,
-    .f = run_and_save_simulation_csv,
-    output_dir = here(output_directory_name) # 将输出目录作为固定参数传递
+    # 1. 生成所有参数组合
+    parameter_grid <- expand.grid(change_parameters, stringsAsFactors = FALSE)
+    total_simulations <- nrow(parameter_grid)
+
+    cat(paste("Total number of parameter combinations to simulate:", total_simulations, "\n"))
+
+    # 初始化 progress 包的进度条
+    # format 参数定义了进度条的样式
+    # :bar 是进度条本身
+    # :current 是当前迭代次数
+    # :total 是总迭代次数
+    # :percent 是完成百分比
+    # :eta 是预计剩余时间
+    # :elapsed 是已用时间
+    pb <- progress::progress_bar$new(
+        format = "  Simulating [:bar] :current/:total (:percent) | ETA: :eta | Elapsed: :elapsed",
+        total = total_simulations,
+        width = 80, # 进度条的宽度
+        clear = FALSE # 完成后不清除进度条
+    )
+
+    # 2. 循环遍历每一种参数组合
+    for (i in 1:total_simulations) {
+        # 在每次迭代开始时，更新进度条的状态 (如果你想在参数名中显示当前参数)
+        # 或者，更简单的方式是只在迭代结束前调用 pb$tick()
+        # 为了简单起见，我们主要使用 pb$tick()
+
+        current_sim_params <- base_parameters
+        current_file_name_parts <- c()
+
+        for (param_name in names(parameter_grid)) {
+            current_value <- parameter_grid[i, param_name]
+            current_sim_params[[param_name]] <- current_value
+            current_file_name_parts <- c(current_file_name_parts, paste0(param_name, "_", current_value))
+        }
+
+        specific_file_name <- paste(current_file_name_parts, collapse = "__")
+        specific_file_name <- gsub("\\.", "p", specific_file_name)
+        specific_file_name <- gsub("-", "neg", specific_file_name)
+        specific_file_name <- paste0(specific_file_name, ".csv")
+        full_file_path <- file.path(csv_file_base_address, specific_file_name)
+
+        # (可选) 更新进度条的 token，如果你想显示当前正在处理的参数
+        # current_param_display <- paste(names(parameter_grid), "=", parameter_grid[i, ], collapse = ", ")
+        # pb$tick(0, tokens = list(what = current_param_display)) # tick(0) 不推进进度，只更新token
+
+        # 3. 运行模拟
+        n_simulations_per_combination <- n_simulations_per_combination # 默认值
+        if (!is.null(current_sim_params$n_simulations_per_combination)) {
+            n_simulations_per_combination <- current_sim_params$n_simulations_per_combination
+        } else if (!is.null(current_sim_params$n_simulations)) {
+            n_simulations_per_combination <- current_sim_params$n_simulations
+        }
+
+        small_simulation <- simulation_cmlfamily_multsnps_cpp(
+            n_simulations_per_combination,
+            current_sim_params
+        )
+        small_simulation_tibble <- simulation_ListtoTibble(small_simulation)
+
+        # 4. 保存结果到 CSV 文件
+        if (!dir.exists(csv_file_base_address)) {
+            dir.create(csv_file_base_address, recursive = TRUE)
+        }
+
+        if (!is.null(small_simulation_tibble) && !is.null(small_simulation_tibble$tibble)) {
+            write.csv2(as.data.frame(small_simulation_tibble$tibble),
+                file = full_file_path,
+                row.names = FALSE
+            )
+        } else {
+            warning_message <- paste0(
+                "Warning: Simulation ", i, "/", total_simulations,
+                " did not return valid data to save for parameters: ",
+                paste(names(parameter_grid), parameter_grid[i, ], collapse = ", ")
+            )
+            warning(warning_message)
+        }
+
+        # 推进进度条 (在每次迭代的末尾)
+        pb$tick()
+    }
+
+    # 进度条完成后，可以打印一条完成信息
+    # pb$terminate() # 如果 clear = TRUE, 这会清除进度条。如果 clear = FALSE, 它只是确保光标在新行。
+    cat("\nAll simulations completed.\n")
+}
+csv_file_address <- "MR 模拟/MR 模拟结果/cml_family_ver2的模拟结果"
+change_parameters <- list(
+    assortative_mating_strength = c(0.1, 1, 10, 100),
+    beta_exp_to_out = c(-0.15, -0.10, -0.05, 0, 0.05, 0.10, 0.15),
+    num_pleiotropic = c(0, 1, 3),
+    crowd_stratification_differences = c(0, 0.05, 0.1)
 )
-message("所有模拟运行和保存操作已完成。")
+base_parameters <- sim_params_list <- list( # --- 从列表解包参数 ---
+    n = 10, num_pleiotropic = 0, N_out = 1000,
+    # 样本重叠
+    overlap_prop = 0,
+    # 直接效应
+    beta_FStoOE_exp = 0.1,
+    beta_MStoOE_exp = 0.1,
+    beta_OStoOE_exp = 0.3,
+    # 水平多效性
+    prop_negative_pleiotropy =
+        0, # 不满足inside假设
+    mean_beta_FStoOE_out = 0,
+    sd_beta_FStoOE_out = 0.05,
+    mean_beta_MStoOE_out = 0,
+    sd_beta_MStoOE_out = 0.05,
+    mean_beta_OStoOE_out = 0,
+    sd_beta_OStoOE_out = 0.05,
+    # 选型婚配
+    assortative_mating_prob = 0.999, # 选型婚配比例
+    assortative_mating_strength = 1000, # 选型婚配强度
+    # 人群分层（双人群差异）
+    crowd_stratification_differences = 0,
+    # 其他参数设置
+    beta_exp_to_out = 0,
+    beta_confounding_exp = 0.2,
+    beta_confounding_out = 0.2,
+    correlation = 0.2,
+    seed = NULL
+)
 
-# 6. （可选）检查生成的文件列表或处理失败的情况
-# list_of_created_files 将包含成功保存的文件路径或NULL（如果失败）
-# 您可以检查这个列表来确认哪些成功了，哪些失败了
-successful_saves <- Filter(Negate(is.null), list_of_created_files)
-failed_saves_count <- length(list_of_created_files) - length(successful_saves)
-
-message(paste("成功保存的文件数量:", length(successful_saves)))
-if (failed_saves_count > 0) {
-    message(paste("失败的保存/模拟数量:", failed_saves_count))
-}
-
-# 您可以打印出前几个成功保存的文件名
-# print(head(successful_saves))
+test <- run_simulations_with_fancy_pb(
+    n_simulations_per_combination = 500,
+    csv_file_address, change_parameters, base_parameters
+)
