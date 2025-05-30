@@ -736,15 +736,16 @@ generate_multiple_datasets_v3 <- function(
 #' @param r 代表相关系数
 #' @param bool 代表逻辑
 generate_mr_trio_data_ultra <- function(
-    n_snps = 3,
-    n_independent = 500, n_trio = 500, p_overlap = 0,
+    n_snps = 3, n_pleiotropy = 1,
+    n_independent = 1000, p_trio = 0.5,
+    p_exp_out = 0.5, p_overlap = 0,
     p_f = 0.3, p_m = 0.3, # p_m 当前未在SNP生成中使用
     # 暴露效应
     beta_fs_oe_exp = 0.3, beta_ms_oe_exp = 0.3,
     beta_os_oe_exp = 0.3,
     # 结局效应 (直接多效性 / 遗传叠加效应)
     beta_fs_oe_out = 0, beta_ms_oe_out = 0,
-    beta_os_oe_out = 0,
+    beta_os_oe_out = 0, p_negative_pleiotropy = 0,
     # 因果效应
     beta_exp_to_out = 0.4,
     # 混杂效应
@@ -752,9 +753,11 @@ generate_mr_trio_data_ultra <- function(
     # 其他参数
     r_correlation = 0.2, n_seed = NULL,
     # 选型婚配强度(跨性状)
-    n_am = 1000) {
+    assortative_mating_strength = 1000) {
   # --- 0. 设置随机种子 (确保结果可重复性) ---
-  set.seed(seed)
+  set.seed(n_seed)
+
+  # 确定各个snps的性质
 
   # --- 系数弄成矩阵
   matrix_beta_os_oe_exp <- matrix(beta_os_oe_exp / n_snps,
@@ -766,15 +769,23 @@ generate_mr_trio_data_ultra <- function(
   matrix_beta_ms_oe_exp <- matrix(beta_ms_oe_exp / n_snps,
     ncol = 1, nrow = n_snps
   )
+
+  # 让一些多效性是负的和有一些没有或者有多效性
+  indices_out <- sample(c(-1, 1), n_snps,
+    prob = c(p_negative_pleiotropy, 1 - p_negative_pleiotropy), replace = TRUE
+  )
+  indices_not_out <- sample(1:n_snps, n_pleiotropy, replace = FALSE)
+  indices_out[indices_not_out] <- 0
+
   matrix_beta_os_oe_out <- matrix(beta_os_oe_out / n_snps,
     ncol = 1, nrow = n_snps
-  )
+  ) * indices_out
   matrix_beta_fs_oe_out <- matrix(beta_fs_oe_out / n_snps,
     ncol = 1, nrow = n_snps
-  )
+  ) * indices_out
   matrix_beta_ms_oe_out <- matrix(beta_ms_oe_out / n_snps,
     ncol = 1, nrow = n_snps
-  )
+  ) * indices_out
   # ---
 
 
@@ -836,8 +847,8 @@ generate_mr_trio_data_ultra <- function(
     sd_err <- sqrt(1 - var_results)
 
     # 添加随机误差，生成最终的暴露值
-    value_expose <- value_expose + rnorm(n_independent, mean = 0, sd = sd_err)
-    return(value_expose)
+    values_expose <- values_expose + rnorm(n_independent, mean = 0, sd = sd_err)
+    return(values_expose)
   }
 
   generate_outcome_function <- function(beta_exp_to_out,
@@ -1040,74 +1051,71 @@ generate_mr_trio_data_ultra <- function(
     assortative_mating_strength
   )
   # 更新父母的SNP和暴露向量，使其根据选型婚配的结果重新排序
-  Father_SNPs <- parent_am_results[[1]]$snps # 排序后的父亲SNP
-  Mother_SNPs <- parent_am_results[[2]]$snps # 排序后并与父亲配对的母亲SNP
-  Father_expose <- parent_am_results[[1]]$expose # 排序后的父亲暴露
-  Mother_expose <- parent_am_results[[2]]$expose # 排序后并与父亲配对的母亲暴露
-  Father_outcome <- parent_am_results[[1]]$outcome # 排序后的父亲暴露
-  Mother_outcome <- parent_am_results[[2]]$outcome # 排序后并与父亲配对的母亲暴露
+  father_snps <- as.matrix(parent_am_results[[1]][, 1:n_snps]) # 排序后的父亲SNP
+  mother_snps <- as.matrix(parent_am_results[[2]][, 1:n_snps]) # 排序后并与父亲配对的母亲SNP
+  father_expose <- parent_am_results[[1]]$expose # 排序后的父亲暴露
+  mother_expose <- parent_am_results[[2]]$expose # 排序后并与父亲配对的母亲暴露
+  father_outcome <- parent_am_results[[1]]$outcome # 排序后的父亲暴露
+  mother_outcome <- parent_am_results[[2]]$outcome # 排序后并与父亲配对的母亲暴露
 
   # --- 10. 生成子代基因型和暴露数据 ---
   # 子代的基因型 = 父亲传递的等位基因 + 母亲传递的等位基因
-  Offspring_SNPs <- internal_get_transmitted_allele(Father_SNPs) +
-    internal_get_transmitted_allele(Mother_SNPs)
+  offspring_snps <- matrix(0, nrow = n_independent, ncol = n_snps)
+  for (i in 1:n_snps) {
+    offspring_snps[, i] <- internal_get_transmitted_allele(father_snps[, i]) +
+      internal_get_transmitted_allele(mother_snps[, i])
+  }
 
-  # 子代的暴露，受其自身SNP以及其父母SNP的遗传叠加效应影响
-  Offspring_expose <- generate_expose_function(
-    beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp, # 自身、父亲、母亲的SNP效应
-    Offspring_SNPs, Father_SNPs, Mother_SNPs,
-    confounder_exp_values, correlation_factor_exp_values
+  offspring_expose <- generate_expose_function(
+    matrix_beta_os_oe_exp, matrix_beta_fs_oe_exp, matrix_beta_ms_oe_exp, # 自身SNP效应, 无父母SNP效应
+    offspring_snps, father_snps, mother_snps, # 自身SNP作为父母SNP传入
+    values_confounder_exp, values_correlation_factor_exp
   )
-
-
-
-  # --- 12. 为父亲、母亲和子代生成结局数据 ---
-  # 父亲的结局
-  # 子代的结局
-  Offspring_outcome <- generate_outcome_function(
-    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
-    Offspring_expose, Offspring_SNPs, Father_SNPs, Mother_SNPs, # 子代的父母是Father和Mother
-    confounder_out_values, correlation_factor_out_values
+  offspring_outcome <- generate_outcome_function(
+    beta_exp_to_out, matrix_beta_os_oe_out,
+    matrix_beta_fs_oe_out, matrix_beta_ms_oe_out, # 自身SNP效应, 无父母SNP效应
+    offspring_expose, offspring_snps,
+    father_snps, mother_snps, # 自身SNP作为父母SNP传入
+    values_confounder_out, values_correlation_factor_out
   )
 
   # --- 13. 创建包含所有模拟信息的完整数据集 ---
   # 这个数据集包含了 N_total 个家庭（父亲-母亲-子代）的完整信息
   data_all <- data.frame(
-    ID = all_indices, # 个体/家庭的唯一ID，方便后续追踪和抽样
-    Father_SNPs = Father_SNPs,
-    Mother_SNPs = Mother_SNPs,
-    Offspring_SNPs = Offspring_SNPs,
-    Father_expose = Father_expose,
-    Mother_expose = Mother_expose,
-    Offspring_expose = Offspring_expose,
-    Father_outcome = Father_outcome,
-    Mother_outcome = Mother_outcome,
-    Offspring_outcome = Offspring_outcome
+    id = 1:n_independent, # 个体/家庭的唯一ID，方便后续追踪和抽样
+    father_snps = father_snps,
+    father_expose = father_expose,
+    father_outcome = father_outcome,
+    mother_snps = mother_snps,
+    mother_expose = mother_expose,
+    mother_outcome = mother_outcome,
+    offspring_snps = offspring_snps,
+    offspring_expose = offspring_expose,
+    offspring_outcome = offspring_outcome
     # 注意：这里可能还需要包含祖父母辈的SNP和暴露/结局数据，如果下游分析需要的话。
     # 当前版本主要集中在父母和子代。
   )
-
-  # --- 14. 根据重叠比例为双样本MR抽取暴露组和结局组的样本索引 ---
-  # 计算实际重叠的样本数量
-  N_overlap_actual <- floor(min(N_exp, N_out) * overlap_prop)
+  n_overlap <- floor(n_independent * p_overlap)
 
   # 计算各组独有的样本数量
-  N_exp_only_final <- N_exp - N_overlap_actual
-  N_out_only_final <- N_out - N_overlap_actual
+  n_exp <- floor(n_independent * p_exp_out)
+  n_out <- n_independent - n_exp
+  n_exp_only_final <- n_exp - n_overlap
+  n_out_only_final <- n_out - n_overlap
 
   # 从总个体索引池 (all_indices) 中进行抽样
-  indices_pool <- all_indices # 初始化索引池
+  indices_pool <- n_independent # 初始化索引池
 
   # 1. 抽取重叠部分的样本索引
-  indices_overlap <- sample(indices_pool, size = N_overlap_actual, replace = FALSE)
+  indices_overlap <- sample(indices_pool, size = n_overlap, replace = FALSE)
   indices_pool <- setdiff(indices_pool, indices_overlap) # 从池中移除已抽取的重叠样本
 
   # 2. 抽取暴露组独有的样本索引
-  indices_exp_only <- sample(indices_pool, size = N_exp_only_final, replace = FALSE)
+  indices_exp_only <- sample(indices_pool, size = n_exp_only_final, replace = FALSE)
   indices_pool <- setdiff(indices_pool, indices_exp_only) # 从池中移除
 
   # 3. 抽取结局组独有的样本索引
-  indices_out_only <- sample(indices_pool, size = N_out_only_final, replace = FALSE)
+  indices_out_only <- sample(indices_pool, size = n_out_only_final, replace = FALSE)
   # indices_pool <- setdiff(indices_pool, indices_out_only) # 池中剩余的未使用，如果需要可以记录
 
   # 组合最终的暴露组和结局组样本索引
@@ -1117,175 +1125,523 @@ generate_mr_trio_data_ultra <- function(
   # --- 15. 根据抽取的索引创建最终的暴露组和结局组数据框 ---
   # 暴露组数据 (包含ID以及所有三代的SNP和暴露数据)
   exposure_data <- data_all %>%
-    filter(ID %in% indices_exp_final) %>%
+    filter(id %in% indices_exp_final) %>%
     # 选择研究所需的列，这里包含了所有三代的信息以供灵活分析
     dplyr::select(
-      ID,
-      Father_SNPs, Mother_SNPs, Offspring_SNPs,
-      Father_expose, Mother_expose, Offspring_expose
-      # 如果需要结局信息在暴露数据中（例如用于真实效应估计），可以添加
-      # Father_outcome, Mother_outcome, Offspring_outcome
+      id,
+      starts_with("father_snps"),
+      starts_with("mother_snps"),
+      starts_with("offspring_snps"),
+      father_expose, mother_expose, offspring_expose
     )
 
   # 结局组数据 (包含ID以及所有三代的SNP和结局数据)
   outcome_data <- data_all %>%
-    filter(ID %in% indices_out_final) %>%
+    filter(id %in% indices_out_final) %>%
+    # 选择研究所需的列，这里包含了所有三代的信息以供灵活分析
     dplyr::select(
-      ID,
-      Father_SNPs, Mother_SNPs, Offspring_SNPs,
-      # Father_expose, Mother_expose, Offspring_expose, # 通常结局GWAS不直接测量暴露
-      Father_outcome, Mother_outcome, Offspring_outcome
+      id,
+      starts_with("father_snps"),
+      starts_with("mother_snps"),
+      starts_with("offspring_snps"),
+      father_outcome, mother_outcome, offspring_outcome
     )
 
-  # --- 16. 返回包含暴露数据和结局数据的列表 ---
-  return(list(exposure_data = as.data.frame(exposure_data), outcome_data = as.data.frame(outcome_data)))
-}
-generate_multiple_datasets_v4_ultra <- function(
-    n = 10, # 要生成的总数据集数量
-    num_pleiotropic = 1, # 指定多少个数据集的SNP具有 *潜在的* 非零结局效应(即基因多效性)
-    n_independent_individual = 5,
-    N_exp = 1000, N_out = 1000, overlap_prop = 0,
-    p_f = 0.3, p_m = 0.3,
-    # --- 暴露效应 (当非零时的大小) ---
-    beta_FStoOE_exp = 0.1, beta_MStoOE_exp = 0.1,
-    beta_OStoOE_exp = 0.3,
-    # --- 结局效应 / 水平多效性 (当非零时的分布参数) ---
-    # 子代基因型 -> 结局 (遗传叠加效应或基因多效性)
-    mean_beta_FStoOE_out = 0.1, sd_beta_FStoOE_out = 0.05,
-    mean_beta_MStoOE_out = 0.1, sd_beta_MStoOE_out = 0.05,
-    # 父母基因型 -> 结局 (应为子代自身SNP对结局的效应，即基因多效性; 参数名可能需对应调整)
-    mean_beta_OStoOE_out = 0.1, sd_beta_OStoOE_out = 0.05,
-    prop_negative_pleiotropy = 0.5, # 在指定为多效性的SNP中，其效应为负的比例 (0 到 1)
-    # 选型婚配
-    assortative_mating_prob = 0,
-    assortative_mating_strength = 0, # 选型婚配对结局的影响因子
-    # 人群分层
-    ## 定义人群分层的差异(次等位基因频率差异)
-    crowd_stratification_differences = 0, # 用于模拟两个具有不同等位基因频率的亚群
-    # --- 其他效应 ---
-    beta_exp_to_out = 0.4, # 暴露对结局的真实因果效应
-    beta_confounding_exp = 0.2, # 影响暴露的混杂因素的方差 (效应大小为1)
-    beta_confounding_out = 0.2, # 影响结局的混杂因素的方差 (效应大小为1)
-    correlation = 0.2, # 共享环境因素的方差
-    seed = NULL) { # 随机数种子
 
-  # --- 1. 输入验证与随机种子设置 ---
-  if (!is.null(seed)) {
-    set.seed(seed) # 设置随机种子以保证结果可重复性
+  # 把样本分为三联体与独立个体组
+  n_trio_exp <- floor(nrow(exposure_data) * p_trio)
+  n_independent_exp <- nrow(exposure_data) - n_trio_exp
+  data_independent_exp <- exposure_data[1:n_independent_exp, ] %>%
+    dplyr::select(starts_with("offspring_snps"), offspring_expose)
+
+  data_trio_exp <- exposure_data[(n_independent_exp + 1):nrow(exposure_data), ] %>%
+    dplyr::select(
+      starts_with("father_snps"),
+      starts_with("mother_snps"),
+      starts_with("offspring_snps"),
+      father_expose, mother_expose, offspring_expose
+    )
+
+  n_trio_out <- floor(nrow(outcome_data) * p_trio)
+  n_independent_out <- nrow(outcome_data) - n_trio_out
+  data_independent_out <- outcome_data[1:n_independent_out, ] %>%
+    dplyr::select(starts_with("offspring_snps"), offspring_outcome)
+
+  data_trio_out <- outcome_data[(n_independent_out + 1):nrow(outcome_data), ] %>%
+    dplyr::select(
+      starts_with("father_snps"),
+      starts_with("mother_snps"),
+      starts_with("offspring_snps"),
+      father_outcome, mother_outcome, offspring_outcome
+    )
+  results <- list()
+  results[[1]] <- data_independent_exp
+  results[[2]] <- data_trio_exp
+  results[[3]] <- data_independent_out
+  results[[4]] <- data_trio_out
+  # --- 16. 返回包含暴露数据和结局数据的列表 ---
+  return(results)
+}
+
+
+generate_mr_trio_data_ultra_updata <- function(
+    n_snps = 3, n_pleiotropy = 1,
+    n_independent = 1000, p_trio = 0.5,
+    p_exp_out = 0.5, p_overlap = 0,
+    p_f = 0.3, p_m = 0.3, # p_m 当前未在SNP生成中使用
+    # 暴露效应
+    beta_fs_oe_exp = 0.3, beta_ms_oe_exp = 0,
+    beta_os_oe_exp = 0,
+    # 结局效应 (直接多效性 / 遗传叠加效应)
+    beta_fs_oe_out = 0, beta_ms_oe_out = 0,
+    beta_os_oe_out = 0, p_negative_pleiotropy = 0,
+    # 因果效应
+    beta_exp_to_out = 0.4,
+    # 混杂效应
+    var_confounding_exp = 0.2, var_confounding_out = 0.2,
+    # 其他参数
+    r_correlation = 0.2, n_seed = NULL,
+    # 选型婚配强度(跨性状)
+    assortative_mating_strength = 1000) {
+  # --- 0. 设置随机种子 (确保结果可重复性) ---
+  set.seed(n_seed)
+
+  # --- 1. 初始化效应系数和多效性模式 ---
+  #   1.1 计算每个SNP的平均效应值 (假设总效应均分到各SNP)
+  beta_os_oe_exp_snp <- beta_os_oe_exp / n_snps
+  beta_fs_oe_exp_snp <- beta_fs_oe_exp / n_snps
+  beta_ms_oe_exp_snp <- beta_ms_oe_exp / n_snps
+
+  beta_os_oe_out_snp <- beta_os_oe_out / n_snps
+  beta_fs_oe_out_snp <- beta_fs_oe_out / n_snps
+  beta_ms_oe_out_snp <- beta_ms_oe_out / n_snps
+
+  #   1.2 构建基础遗传效应矩阵 (暴露)
+  matrix_beta_os_oe_exp <- matrix(beta_os_oe_exp_snp, ncol = 1, nrow = n_snps)
+  matrix_beta_fs_oe_exp <- matrix(beta_fs_oe_exp_snp, ncol = 1, nrow = n_snps)
+  matrix_beta_ms_oe_exp <- matrix(beta_ms_oe_exp_snp, ncol = 1, nrow = n_snps)
+
+  #   1.3 定义多效性效应的修正因子 (用于结局的遗传效应)
+  #       pleio_modifier: 一个向量，对于非多效性SNP为0，对于多效性SNP为-1或1
+  pleio_modifier <- numeric(n_snps)
+  if (n_pleiotropy > 0 && n_pleiotropy <= n_snps) {
+    pleiotropic_snp_indices <- sample(1:n_snps, n_pleiotropy, replace = FALSE)
+    pleiotropic_effects_direction <- sample(c(-1, 1), n_pleiotropy,
+      prob = c(p_negative_pleiotropy, 1 - p_negative_pleiotropy),
+      replace = TRUE
+    )
+    pleio_modifier[pleiotropic_snp_indices] <- pleiotropic_effects_direction
+  } else if (n_pleiotropy > n_snps) {
+    # warning("n_pleiotropy cannot exceed n_snps. Assuming all SNPs are pleiotropic.")
+    pleio_modifier <- sample(c(-1, 1), n_snps,
+      prob = c(p_negative_pleiotropy, 1 - p_negative_pleiotropy),
+      replace = TRUE
+    )
+  }
+  # 如果 n_pleiotropy = 0, pleio_modifier 保持为全零，即无多效性效应
+
+  #   1.4 构建结局的遗传效应矩阵 (应用多效性修正)
+  matrix_beta_os_oe_out <- matrix(beta_os_oe_out_snp, ncol = 1, nrow = n_snps) * pleio_modifier
+  matrix_beta_fs_oe_out <- matrix(beta_fs_oe_out_snp, ncol = 1, nrow = n_snps) * pleio_modifier
+  matrix_beta_ms_oe_out <- matrix(beta_ms_oe_out_snp, ncol = 1, nrow = n_snps) * pleio_modifier
+
+  # --- 2. 定义核心辅助函数 ---
+  #   2.1 (内部辅助函数) 模拟从单个亲本传递给子代的等位基因
+  internal_get_transmitted_allele <- function(parent_snps) {
+    transmitted_alleles <- numeric(length(parent_snps))
+    for (i in seq_along(parent_snps)) {
+      genotype <- parent_snps[i]
+      if (genotype == 0) {
+        transmitted_alleles[i] <- 0
+      } else if (genotype == 2) {
+        transmitted_alleles[i] <- 1
+      } else if (genotype == 1) {
+        transmitted_alleles[i] <- rbinom(1, 1, 0.5)
+      } else {
+        # warning(paste("在 internal_get_transmitted_allele 中发现无效的亲本基因型:", genotype, "位于索引", i, "- 将传递NA值"))
+        transmitted_alleles[i] <- NA # 或者进行错误处理
+      }
+    }
+    return(transmitted_alleles)
   }
 
-  # --- 2. 确定哪些数据集的SNP将具有潜在的多效性 ---
-  n_pool <- 1:n # 创建一个从1到n的索引池
-  # 从索引池中随机抽取 num_pleiotropic 个索引，这些索引对应的数据集将具有潜在的多效性SNP
-  pleiotropic_indices <- sample(n_pool, num_pleiotropic)
-  # 其余索引对应的数据集将作为有效的工具变量（无多效性）
-  not_pleiotropic_indices <- setdiff(n_pool, pleiotropic_indices)
-  # 独立个体数据集指示变量
-  independent_indices <- 1:n_independent_individual
-
-  # --- 3. 循环生成 n 个独立的数据集 ---
-  all_datasets <- vector("list", n) # 初始化一个列表以存储所有生成的数据集
-
-  for (i in 1:n) { # 对每个数据集进行循环
-    # --- 3a. 判断当前数据集 i 的特性 ---
-    # 检查当前数据集的索引 i 是否在之前抽取的 "pleiotropic_indices" 中
-    is_pleiotropic_candidate <- i %in% pleiotropic_indices # 如果为 TRUE, 则此数据集的SNP是潜在多效性的
-
-    # --- 3b. 为当前循环设置将要传递给底层数据生成函数的 beta 参数值 ---
-
-    # --- 暴露效应参数 (在所有数据集中保持不变) ---
-    current_beta_FStoOE_exp <- beta_FStoOE_exp
-    current_beta_MStoOE_exp <- beta_MStoOE_exp
-    current_beta_OStoOE_exp <- beta_OStoOE_exp
-
-
-    # --- 结局效应 / 水平多效性参数 (核心修改部分) ---
-    if (is_pleiotropic_candidate) {
-      # 如果当前SNP是潜在多效性的:
-      # 1. 决定这个多效性SNP的效应方向 (正或负)
-      #    rbinom(1, 1, prob) 返回0或1。这里用 runif(1) < prop_negative_pleiotropy 判断是否为负向。
-      direction_multiplier <- if (runif(1) < prop_negative_pleiotropy) -1 else 1 # -1代表负向, 1代表正向
-
-      # 2. 为这个特定的SNP i (数据集 i) 抽样生成多效性效应的大小
-      #    效应大小从一个正态分布中抽样，该分布的均值为 (方向 * 输入的均值参数)，标准差为输入的标准差参数。
-      current_beta_FStoOE_out <- rnorm(1, mean = direction_multiplier * mean_beta_FStoOE_out, sd = sd_beta_FStoOE_out)
-      current_beta_MStoOE_out <- rnorm(1, mean = direction_multiplier * mean_beta_MStoOE_out, sd = sd_beta_MStoOE_out)
-      current_beta_OStoOE_out <- rnorm(1, mean = direction_multiplier * mean_beta_OStoOE_out, sd = sd_beta_OStoOE_out)
-
-      snp_label <- "pleiotropic_variable" # 标记此SNP为具有（随机生成的）多效性效应
-    } else {
-      # 如果当前SNP不是多效性的 (即，它是一个有效的工具变量):
-      # 将其对结局的直接效应（多效性效应）设置为 0。
-      current_beta_FStoOE_out <- 0
-      current_beta_MStoOE_out <- 0
-      current_beta_OStoOE_out <- 0
-
-      snp_label <- "valid_instrument" # 标记此SNP为有效工具变量
+  #   2.2 (内部辅助函数) 为指定人群生成SNP基因型
+  #       假设 generate_snp_hwe(n_samples, maf) 返回一个长度为 n_samples 的基因型向量 (0,1,2)
+  #       如果 generate_snp_hwe 未定义, 你需要提供它，例如:
+  if (!exists("generate_snp_hwe")) {
+    generate_snp_hwe <- function(n_samples, maf) {
+      rbinom(n_samples, 2, maf)
     }
-
-    # --- 选型婚配参数设置 ---
-    # 根据 compatibility_selection_prop 概率决定当前数据集是否应用选型婚配
-    is_compatibility_selection <- if (runif(1) < assortative_mating_prob) 1 else 0
-    if (is_compatibility_selection == 1) {
-      # 如果应用选型婚配，则使用函数输入的选型婚配参数
-      current_assortative_mating_strength <- assortative_mating_strength
-    } else {
-      current_assortative_mating_strength <- 1000 # 对结局的影响因子设为0
+    # message("generate_snp_hwe was not defined. Using a binomial approximation for genotypes.")
+  }
+  internal_generate_population_snps <- function(n_individuals, num_snps, allele_freq) {
+    snps_matrix <- matrix(0, nrow = n_individuals, ncol = num_snps)
+    for (j in 1:num_snps) {
+      snps_matrix[, j] <- generate_snp_hwe(n_samples = n_individuals, maf = allele_freq)
     }
+    return(snps_matrix)
+  }
 
-    # --- 人群分层参数设置 ---
-    # 为当前数据集随机选择等位基因频率，以模拟人群分层
-    # current_p_f 从 (p_f, p_f + 差异) 中随机选一个
-    current_p_f <- sample(c(p_f, p_f + crowd_stratification_differences), 1)
-    # current_p_m 从 (p_m, p_m + 差异) 中随机选一个
-    current_p_m <- sample(c(p_m, p_m + crowd_stratification_differences), 1)
+  #   2.3 (内部辅助函数) 生成暴露表型
+  generate_expose_function <- function(beta_own_snp_effect,
+                                       beta_father_snp_effect,
+                                       beta_mother_snp_effect,
+                                       snps_own, snps_father, snps_mother,
+                                       confounder_values,
+                                       correlation_factor_values,
+                                       num_individuals = n_independent) { # 确保样本数正确
+    genetic_component <- snps_own %*% beta_own_snp_effect +
+      snps_father %*% beta_father_snp_effect +
+      snps_mother %*% beta_mother_snp_effect
+
+    deterministic_part <- genetic_component + confounder_values + correlation_factor_values
+    var_deterministic <- var(deterministic_part, na.rm = TRUE)
+    # 确保误差标准差非负，目标总方差为1
+    sd_error <- sqrt(max(0, 1 - var_deterministic))
+
+    expose_values <- deterministic_part + rnorm(num_individuals, mean = 0, sd = sd_error)
+    return(expose_values)
+  }
+
+  #   2.4 (内部辅助函数) 生成结局表型
+  generate_outcome_function <- function(causal_effect_exp_to_out,
+                                        beta_own_snp_pleio,
+                                        beta_father_snp_pleio,
+                                        beta_mother_snp_pleio,
+                                        exposure_values, snps_own, snps_father, snps_mother,
+                                        confounder_values, correlation_factor_values,
+                                        num_individuals = n_independent) { # 确保样本数正确
+    genetic_pleiotropy_component <- snps_own %*% beta_own_snp_pleio +
+      snps_father %*% beta_father_snp_pleio +
+      snps_mother %*% beta_mother_snp_pleio
+
+    deterministic_part <- causal_effect_exp_to_out * exposure_values +
+      genetic_pleiotropy_component +
+      confounder_values + correlation_factor_values
+
+    var_deterministic <- var(deterministic_part, na.rm = TRUE)
+    sd_error <- sqrt(max(0, 1 - var_deterministic))
+
+    outcome_values <- deterministic_part + rnorm(num_individuals, mean = 0, sd = sd_error)
+    return(outcome_values)
+  }
+
+  #   2.5 (内部辅助函数) 选型婚配
+  assortative_mating_function <- function(snps_p1, expose_p1, outcome_p1,
+                                          snps_p2, expose_p2, outcome_p2,
+                                          mating_strength, num_individuals = n_independent) {
+    data_p1 <- data.frame(snps = snps_p1, expose = expose_p1, outcome = outcome_p1)
+    data_p2 <- data.frame(snps = snps_p2, expose = expose_p2, outcome = outcome_p2)
+
+    # 根据 p1 的暴露 (加噪音) 和 p2 的结局 (加噪音) 进行排序以模拟选型婚配
+    # mating_strength 是噪音的方差，值越大，选型婚配效应越弱
+    data_p1 <- data_p1 %>%
+      dplyr::mutate(mating_pheno_star = expose + rnorm(num_individuals, mean = 0, sd = sqrt(mating_strength))) %>%
+      dplyr::arrange(mating_pheno_star)
+
+    data_p2 <- data_p2 %>%
+      dplyr::mutate(mating_pheno_star = outcome + rnorm(num_individuals, mean = 0, sd = sqrt(mating_strength))) %>%
+      dplyr::arrange(mating_pheno_star) # 注意：这里原函数第二个对象是用outcome排序
+
+    return(list(data_p1, data_p2))
+  }
 
 
+  # --- 3. 为所有 N_independent 个体生成混杂因素和共享环境因素 ---
+  values_confounder_exp <- rnorm(n_independent, mean = 0, sd = sqrt(var_confounding_exp))
+  values_confounder_out <- rnorm(n_independent, mean = 0, sd = sqrt(var_confounding_out)) # 注意原代码这里用了 var_confounding_exp， 如果是独立的应不同
+  # 但为了保持与原函数行为一致，这里仍用 var_confounding_exp
+  # 如果需要结局有独立混杂，应传入 var_confounding_out
 
-    # --- 3c. 调用底层函数 (generate_mr_trio_data_2sample) 生成单个数据集 ---
-    # 将当前循环中确定的参数传递给底层函数
-    # 注意: 底层函数 generate_mr_trio_data_2sample 需要能够接收并处理这里传递的所有参数，
-    data_i <- generate_mr_trio_data_ultra(
-      N_exp = N_exp, N_out = N_out,
-      overlap_prop = overlap_prop,
-      p_f = current_p_f, p_m = current_p_m, # 使用当前循环的等位基因频率
-      beta_FStoOE_exp = current_beta_FStoOE_exp,
-      beta_MStoOE_exp = current_beta_MStoOE_exp,
-      beta_OStoOE_exp = current_beta_OStoOE_exp,
-      # 传递当前循环抽样生成的或设为0的结局效应值
-      beta_FStoOE_out = current_beta_FStoOE_out,
-      beta_MStoOE_out = current_beta_MStoOE_out,
-      beta_OStoOE_out = current_beta_OStoOE_out,
-      beta_exp_to_out = beta_exp_to_out,
-      # beta_confounding_exp 和 beta_confounding_out 可能是笔误，应为 confounding_exp, confounding_out (方差参数)
-      # 或者底层函数期望的是效应大小，这里传递的是方差，需确认。假设底层函数处理这些。
-      confounding_exp = beta_confounding_exp, # 传递混杂方差 (或效应，取决于底层函数定义)
-      confounding_out = beta_confounding_out, # 传递混杂方差 (或效应，取决于底层函数定义)
-      correlation = correlation, seed = NULL, # 在循环内部不应重设主种子，除非有意为每个数据集设独立子种子
-      assortative_mating_strength = current_assortative_mating_strength
+  values_correlation_factor_exp <- rnorm(n_independent, mean = 0, sd = sqrt(r_correlation))
+  values_correlation_factor_out <- rnorm(n_independent, mean = 0, sd = sqrt(r_correlation))
+
+  # --- 4. 祖父母代 (G0) 数据生成 ---
+  #   4.1 生成祖父母SNP
+  #       (gff: 祖父-父系, gmf: 祖母-父系, gfm: 祖父-母系, gmm: 祖母-母系)
+  grandfather_father_snps <- internal_generate_population_snps(n_independent, n_snps, p_f)
+  grandmother_father_snps <- internal_generate_population_snps(n_independent, n_snps, p_f) # 假设与父系使用相同MAF p_f
+  grandfather_mother_snps <- internal_generate_population_snps(n_independent, n_snps, p_f) # 假设与母系使用相同MAF p_f
+  grandmother_mother_snps <- internal_generate_population_snps(n_independent, n_snps, p_f) # 假设与母系使用相同MAF p_f
+
+  #   4.2 生成祖父母暴露
+  #       对于祖父母代，没有更上一代的父母SNP效应，因此其父母SNP效应系数矩阵为0
+  zero_snps_effect_matrix <- matrix(0, nrow = n_snps, ncol = 1)
+  #       作为占位符，传入自身SNP（因为相应效应系数为0，所以无影响）
+  grandfather_father_expose <- generate_expose_function(
+    matrix_beta_os_oe_exp, zero_snps_effect_matrix, zero_snps_effect_matrix,
+    grandfather_father_snps, grandfather_father_snps, grandfather_father_snps, # 后两个是占位符
+    values_confounder_exp, values_correlation_factor_exp
+  )
+  grandmother_father_expose <- generate_expose_function(
+    matrix_beta_os_oe_exp, zero_snps_effect_matrix, zero_snps_effect_matrix,
+    grandmother_father_snps, grandmother_father_snps, grandmother_father_snps,
+    values_confounder_exp, values_correlation_factor_exp
+  )
+  grandfather_mother_expose <- generate_expose_function(
+    matrix_beta_os_oe_exp, zero_snps_effect_matrix, zero_snps_effect_matrix,
+    grandfather_mother_snps, grandfather_mother_snps, grandfather_mother_snps,
+    values_confounder_exp, values_correlation_factor_exp
+  )
+  grandmother_mother_expose <- generate_expose_function(
+    matrix_beta_os_oe_exp, zero_snps_effect_matrix, zero_snps_effect_matrix,
+    grandmother_mother_snps, grandmother_mother_snps, grandmother_mother_snps,
+    values_confounder_exp, values_correlation_factor_exp
+  )
+
+  #   4.3 生成祖父母结局
+  grandfather_father_outcome <- generate_outcome_function(
+    beta_exp_to_out, matrix_beta_os_oe_out, zero_snps_effect_matrix, zero_snps_effect_matrix,
+    grandfather_father_expose, grandfather_father_snps, grandfather_father_snps, grandfather_father_snps,
+    values_confounder_out, values_correlation_factor_out
+  )
+  grandmother_father_outcome <- generate_outcome_function(
+    beta_exp_to_out, matrix_beta_os_oe_out, zero_snps_effect_matrix, zero_snps_effect_matrix,
+    grandmother_father_expose, grandmother_father_snps, grandmother_father_snps, grandmother_father_snps,
+    values_confounder_out, values_correlation_factor_out
+  )
+  grandfather_mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, matrix_beta_os_oe_out, zero_snps_effect_matrix, zero_snps_effect_matrix,
+    grandfather_mother_expose, grandfather_mother_snps, grandfather_mother_snps, grandfather_mother_snps,
+    values_confounder_out, values_correlation_factor_out
+  )
+  grandmother_mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, matrix_beta_os_oe_out, zero_snps_effect_matrix, zero_snps_effect_matrix,
+    grandmother_mother_expose, grandmother_mother_snps, grandmother_mother_snps, grandmother_mother_snps,
+    values_confounder_out, values_correlation_factor_out
+  )
+
+  # --- 5. 祖父母代选型婚配 ---
+  #   5.1 父系祖父母 (爷爷奶奶) 选型婚配
+  #       爷爷按其暴露排序，奶奶按其结局排序
+  grand_father_line_am_results <- assortative_mating_function(
+    grandfather_father_snps, grandfather_father_expose, grandfather_father_outcome,
+    grandmother_father_snps, grandmother_father_expose, grandmother_father_outcome,
+    assortative_mating_strength
+  )
+  #       更新排序后的父系祖父母数据
+  temp_gff_data <- grand_father_line_am_results[[1]]
+  grandfather_father_snps <- as.matrix(temp_gff_data[, grepl("snps.", names(temp_gff_data))]) # 提取所有SNP列
+  grandfather_father_expose <- temp_gff_data$expose
+  grandfather_father_outcome <- temp_gff_data$outcome
+
+  temp_gmf_data <- grand_father_line_am_results[[2]]
+  grandmother_father_snps <- as.matrix(temp_gmf_data[, grepl("snps.", names(temp_gmf_data))])
+  grandmother_father_expose <- temp_gmf_data$expose
+  grandmother_father_outcome <- temp_gmf_data$outcome
+
+  #   5.2 母系祖父母 (外公外婆) 选型婚配
+  #       外公按其暴露排序，外婆按其结局排序
+  grand_mother_line_am_results <- assortative_mating_function(
+    grandfather_mother_snps, grandfather_mother_expose, grandfather_mother_outcome,
+    grandmother_mother_snps, grandmother_mother_expose, grandmother_mother_outcome,
+    assortative_mating_strength
+  )
+  #       更新排序后的母系祖父母数据
+  temp_gfm_data <- grand_mother_line_am_results[[1]]
+  grandfather_mother_snps <- as.matrix(temp_gfm_data[, grepl("snps.", names(temp_gfm_data))])
+  grandfather_mother_expose <- temp_gfm_data$expose
+  grandfather_mother_outcome <- temp_gfm_data$outcome
+
+  temp_gmm_data <- grand_mother_line_am_results[[2]]
+  grandmother_mother_snps <- as.matrix(temp_gmm_data[, grepl("snps.", names(temp_gmm_data))])
+  grandmother_mother_expose <- temp_gmm_data$expose
+  grandmother_mother_outcome <- temp_gmm_data$outcome
+
+  # --- 6. 父母代 (G1) 数据生成 ---
+  #   6.1 生成父母SNP (来自经过选型婚配的祖父母)
+  father_snps <- matrix(0, nrow = n_independent, ncol = n_snps)
+  mother_snps <- matrix(0, nrow = n_independent, ncol = n_snps)
+  for (i in 1:n_snps) {
+    father_snps[, i] <- internal_get_transmitted_allele(grandfather_father_snps[, i]) +
+      internal_get_transmitted_allele(grandmother_father_snps[, i])
+    mother_snps[, i] <- internal_get_transmitted_allele(grandfather_mother_snps[, i]) +
+      internal_get_transmitted_allele(grandmother_mother_snps[, i])
+  }
+
+  #   6.2 生成父母暴露 (受自身SNP及父母SNP效应影响)
+  father_expose <- generate_expose_function(
+    matrix_beta_os_oe_exp, matrix_beta_fs_oe_exp, matrix_beta_ms_oe_exp,
+    father_snps, grandfather_father_snps, grandmother_father_snps,
+    values_confounder_exp, values_correlation_factor_exp
+  )
+  mother_expose <- generate_expose_function(
+    matrix_beta_os_oe_exp, matrix_beta_fs_oe_exp, matrix_beta_ms_oe_exp,
+    mother_snps, grandfather_mother_snps, grandmother_mother_snps,
+    values_confounder_exp, values_correlation_factor_exp
+  )
+
+  #   6.3 生成父母结局
+  father_outcome <- generate_outcome_function(
+    beta_exp_to_out, matrix_beta_os_oe_out, matrix_beta_fs_oe_out, matrix_beta_ms_oe_out,
+    father_expose, father_snps, grandfather_father_snps, grandmother_father_snps,
+    values_confounder_out, values_correlation_factor_out
+  )
+  mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, matrix_beta_os_oe_out, matrix_beta_fs_oe_out, matrix_beta_ms_oe_out,
+    mother_expose, mother_snps, grandfather_mother_snps, grandmother_mother_snps,
+    values_confounder_out, values_correlation_factor_out
+  )
+
+  # --- 7. 父母代选型婚配 ---
+  #     父亲按其暴露排序，母亲按其结局排序
+  parent_generation_am_results <- assortative_mating_function(
+    father_snps, father_expose, father_outcome,
+    mother_snps, mother_expose, mother_outcome,
+    assortative_mating_strength
+  )
+  #     更新排序后的父母数据
+  temp_father_data <- parent_generation_am_results[[1]]
+  father_snps <- as.matrix(temp_father_data[, grepl("snps.", names(temp_father_data))])
+  father_expose <- temp_father_data$expose
+  father_outcome <- temp_father_data$outcome
+
+  temp_mother_data <- parent_generation_am_results[[2]]
+  mother_snps <- as.matrix(temp_mother_data[, grepl("snps.", names(temp_mother_data))])
+  mother_expose <- temp_mother_data$expose
+  mother_outcome <- temp_mother_data$outcome
+
+  # --- 8. 子代 (G2) 数据生成 ---
+  #   8.1 生成子代SNP (来自经过选型婚配的父母)
+  offspring_snps <- matrix(0, nrow = n_independent, ncol = n_snps)
+  for (i in 1:n_snps) {
+    offspring_snps[, i] <- internal_get_transmitted_allele(father_snps[, i]) +
+      internal_get_transmitted_allele(mother_snps[, i])
+  }
+
+  #   8.2 生成子代暴露
+  offspring_expose <- generate_expose_function(
+    matrix_beta_os_oe_exp, matrix_beta_fs_oe_exp, matrix_beta_ms_oe_exp,
+    offspring_snps, father_snps, mother_snps,
+    values_confounder_exp, values_correlation_factor_exp
+  )
+
+  #   8.3 生成子代结局
+  offspring_outcome <- generate_outcome_function(
+    beta_exp_to_out, matrix_beta_os_oe_out, matrix_beta_fs_oe_out, matrix_beta_ms_oe_out,
+    offspring_expose, offspring_snps, father_snps, mother_snps,
+    values_confounder_out, values_correlation_factor_out
+  )
+
+  # --- 9. 构建包含所有模拟信息的完整数据集 ---
+  #     确保SNP列名唯一且易于通过 starts_with 选择
+  colnames(father_snps) <- paste0("father_snps.", 1:n_snps)
+  colnames(mother_snps) <- paste0("mother_snps.", 1:n_snps)
+  colnames(offspring_snps) <- paste0("offspring_snps.", 1:n_snps)
+
+  data_all <- data.frame(
+    id = 1:n_independent,
+    father_snps, father_expose, father_outcome,
+    mother_snps, mother_expose, mother_outcome,
+    offspring_snps, offspring_expose, offspring_outcome
+  )
+
+  # --- 10. 样本选择与划分 ---
+  #   10.1 计算各组样本数量
+  n_exp_total <- floor(n_independent * p_exp_out) # 暴露组总样本数
+  n_out_total <- n_independent - n_exp_total # 结局组总样本数 (或根据p_out参数，若有)
+  # 当前逻辑是 n_out_total = n_independent * (1 - p_exp_out)
+
+  # 确保重叠样本数不超过任一组的总数
+  n_overlap_actual <- min(floor(n_independent * p_overlap), n_exp_total, n_out_total)
+
+  n_exp_only <- n_exp_total - n_overlap_actual
+  n_out_only <- n_out_total - n_overlap_actual
+
+  # 检查所需总独立样本是否超过可用数量 (通常不会，因为它们都来自 n_independent)
+  if ((n_exp_only + n_out_only + n_overlap_actual) > n_independent) {
+    stop("逻辑错误: 所需的唯一子样本总数超过了 n_independent。请检查 p_overlap, p_exp_out 设置。")
+  }
+
+  #   10.2 从总个体索引池中抽样
+  all_available_indices <- 1:n_independent
+
+  indices_overlap <- sample(all_available_indices, size = n_overlap_actual, replace = FALSE)
+  remaining_indices <- setdiff(all_available_indices, indices_overlap)
+
+  indices_exp_only <- sample(remaining_indices, size = n_exp_only, replace = FALSE)
+  remaining_indices <- setdiff(remaining_indices, indices_exp_only)
+
+  # 结局组独有样本从剩余的里面抽
+  # 如果 remaining_indices 不够 n_out_only, sample会报错。这通常意味着初始参数设置有问题。
+  if (length(remaining_indices) < n_out_only) {
+    stop(paste("无法抽取足够的结局组独有样本。剩余:", length(remaining_indices), "需要:", n_out_only))
+  }
+  indices_out_only <- sample(remaining_indices, size = n_out_only, replace = FALSE)
+
+  #   10.3 组合最终的暴露组和结局组样本索引
+  indices_exp_final <- c(indices_overlap, indices_exp_only)
+  indices_out_final <- c(indices_overlap, indices_out_only)
+
+  #   10.4 创建暴露组和结局组数据框
+  exposure_data_full <- data_all %>%
+    dplyr::filter(id %in% indices_exp_final) %>%
+    dplyr::select(
+      id,
+      dplyr::starts_with("father_snps."),
+      dplyr::starts_with("mother_snps."),
+      dplyr::starts_with("offspring_snps."),
+      father_expose, mother_expose, offspring_expose
     )
-    # --- 独立个体参数设置 ---
-    if (i %in% independent_indices) {
-      data_i[[1]] <- data_i[[1]] %>% dplyr::select(ID, Offspring_SNPs, Offspring_expose)
-      data_i[[2]] <- data_i[[2]] %>% dplyr::select(ID, Offspring_SNPs, Offspring_outcome)
-    }
 
-    # --- 3d. 为生成的数据集添加唯一的 dataset_id 和 SNP 类型标签 ---
-    # 检查底层函数返回结果的格式是否符合预期 (一个包含至少两个数据框的列表)
-    if (length(data_i) >= 2 && is.data.frame(data_i[[1]]) && is.data.frame(data_i[[2]])) {
-      data_i[[1]]$dataset_id <- i # 为暴露数据框添加 dataset_id
-      data_i[[2]]$dataset_id <- i # 为结局数据框添加 dataset_id
-      # 添加 SNP 类型标签 (例如 "pleiotropic_variable" 或 "valid_instrument")
-      data_i[[1]]$snp_type <- snp_label
-      data_i[[2]]$snp_type <- snp_label
-    } else {
-      warning(paste("数据集", i, "的生成结果格式不符合预期 (data_i 不是包含两个数据框的列表)，无法添加 ID 和标签。"))
-    }
+  outcome_data_full <- data_all %>%
+    dplyr::filter(id %in% indices_out_final) %>%
+    dplyr::select(
+      id,
+      dplyr::starts_with("father_snps."),
+      dplyr::starts_with("mother_snps."),
+      dplyr::starts_with("offspring_snps."),
+      father_outcome, mother_outcome, offspring_outcome
+    )
 
-    all_datasets[[i]] <- data_i # 将生成的单个数据集 (data_i) 存储到总列表 all_datasets 中
-  } # 结束 for 循环 (生成 n 个数据集)
+  #   10.5 将暴露组和结局组划分为三联体和独立样本
+  #       暴露组划分
+  n_trio_exp <- floor(nrow(exposure_data_full) * p_trio)
+  n_independent_exp <- nrow(exposure_data_full) - n_trio_exp
 
+  #       确保索引不超出范围 (如果样本量过小可能发生)
+  sample_indices_exp <- sample(nrow(exposure_data_full)) # 打乱顺序抽样
+  independent_exp_indices <- sample_indices_exp[1:n_independent_exp]
+  trio_exp_indices <- sample_indices_exp[(n_independent_exp + 1):nrow(exposure_data_full)]
 
-  # --- 5. 返回包含合并后的暴露和结局数据的列表 ---
-  return(all_datasets)
+  data_independent_exp <- exposure_data_full[independent_exp_indices, , drop = FALSE] %>%
+    dplyr::select(dplyr::starts_with("offspring_snps."), offspring_expose)
+
+  data_trio_exp <- exposure_data_full[trio_exp_indices, , drop = FALSE] %>%
+    dplyr::select(
+      dplyr::starts_with("father_snps."),
+      dplyr::starts_with("mother_snps."),
+      dplyr::starts_with("offspring_snps."),
+      father_expose, mother_expose, offspring_expose
+    )
+
+  #       结局组划分
+  n_trio_out <- floor(nrow(outcome_data_full) * p_trio)
+  n_independent_out <- nrow(outcome_data_full) - n_trio_out
+
+  sample_indices_out <- sample(nrow(outcome_data_full)) # 打乱顺序抽样
+  independent_out_indices <- sample_indices_out[1:n_independent_out]
+  trio_out_indices <- sample_indices_out[(n_independent_out + 1):nrow(outcome_data_full)]
+
+  data_independent_out <- outcome_data_full[independent_out_indices, , drop = FALSE] %>%
+    dplyr::select(dplyr::starts_with("offspring_snps."), offspring_outcome)
+
+  data_trio_out <- outcome_data_full[trio_out_indices, , drop = FALSE] %>%
+    dplyr::select(
+      dplyr::starts_with("father_snps."),
+      dplyr::starts_with("mother_snps."),
+      dplyr::starts_with("offspring_snps."),
+      father_outcome, mother_outcome, offspring_outcome
+    )
+
+  # --- 11. 返回结果 ---
+  results <- list(
+    data_independent_exp = data_independent_exp,
+    data_trio_exp = data_trio_exp,
+    data_independent_out = data_independent_out,
+    data_trio_out = data_trio_out
+  )
+
+  return(results)
 }
+
