@@ -42,6 +42,7 @@ library(MASS)
   }
   return(corr_matrix)
 }
+# %% 普通两样本函数
 
 # 创建 SNPs 的函数
 #' @param correlation_type 可以取 "independent, equicorrelated ar1"
@@ -729,6 +730,7 @@ generate_multiple_datasets_v3 <- function(
 }
 
 # %% 新升级的数据生成函数
+
 #' @param n 代表整数
 #' @param p 代表率
 #' @param beta 代表回归系数
@@ -1644,4 +1646,3 @@ generate_mr_trio_data_ultra_updata <- function(
 
   return(results)
 }
-

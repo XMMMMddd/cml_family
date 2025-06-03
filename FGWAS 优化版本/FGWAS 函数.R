@@ -1,3 +1,5 @@
+# %% FGWAS 多个数据
+
 # GLS 的 FGWAS 函数（对于三联体家庭用均值填补）
 FMR_trio_optimized <- function(data_test) {
   n <- nrow(data_test) # 获取样本量
@@ -235,3 +237,222 @@ fgwas_to_mr <- function(results_of_fgwas) {
 # a <- generate_multiple_datasets_v3()
 # results_of_fgwas <- cML_hat_expose_optimized(a[[1]])
 # fgwas_to_MR(results_of_fgwas)
+
+# %% FGWAS 一个大数据
+test <- generate_mr_trio_data_ultra()
+
+test_1 <- perform_fgwas_analysis(test,n_snps = 3)
+# 新增函数：封装 FGWAS 分析过程
+perform_fgwas_analysis <- function(data_set, n_snps) {
+  # 确保加载了必要的包
+  suppressPackageStartupMessages({
+    library(dplyr)
+    library(nlme)
+  })
+
+
+  # 动态确定 n_snps
+  # 假设 snps 列的命名模式是 "snps.1", "snps.2", ...
+
+
+  if (n_snps == 0) {
+    stop("未在 data_set[[1]] (data_independent_exp) 中找到 snps 列，无法确定 n_snps。")
+  }
+
+  beta_hat_exp <- matrix(0, nrow = n_snps, ncol = 2)
+  beta_hat_out <- matrix(0, nrow = n_snps, ncol = 2)
+
+  beta_sigma_exp <- matrix(0, nrow = 2 * n_snps, ncol = 2)
+  beta_sigma_out <- matrix(0, nrow = 2 * n_snps, ncol = 2)
+
+  for (i in 1:n_snps) {
+    snps_matrix_indicator <- (2 * i - 1):(2 * i)
+    snps_indicator <- paste0("snps.", i)
+    data_independent_exp_i <- data_set[[1]] %>%
+      dplyr::select(snps = ends_with(snps_indicator), expose = ends_with("expose")) %>%
+      dplyr::mutate(
+        family_id = 1:n(),
+        family_role = "independent"
+      )
+
+    data_trio_exp_i <- data_set[[2]] %>%
+      dplyr::select(ends_with(snps_indicator), ends_with("expose"))
+    names(data_trio_exp_i)[1] <- "father_snps"
+    names(data_trio_exp_i)[2] <- "mother_snps"
+    names(data_trio_exp_i)[3] <- "offspring_snps"
+    # 求一下次等位基因频率
+    f <- (mean(data_independent_exp_i$snps) / 2 +
+      mean(c(data_trio_exp_i$offspring_snps, data_trio_exp_i$mother_snps)) / 2) / 2
+
+    # 进行填补
+    data_independent_exp_i <- data_independent_exp_i %>%
+      dplyr::mutate(g_snps = snps + 2 * f)
+
+    # 提取3个人并分开
+    data_trio_exp_i_father <- data_trio_exp_i %>% dplyr::select("father_snps", "father_expose")
+    data_trio_exp_i_father$family_id <-
+      (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) + nrow(data_trio_exp_i_father))
+    data_trio_exp_i_mother <- data_trio_exp_i %>% dplyr::select("mother_snps", "mother_expose")
+    data_trio_exp_i_mother$family_id <-
+      (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) + nrow(data_trio_exp_i_father))
+    data_trio_exp_i_offspring <- data_trio_exp_i %>% dplyr::select("offspring_snps", "offspring_expose")
+    data_trio_exp_i_offspring$family_id <-
+      (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) + nrow(data_trio_exp_i_father))
+    # 给他们都变成长数据然后拼起来
+    names(data_trio_exp_i_father) <- c("snps", "expose", "family_id")
+    data_trio_exp_i_father$family_role <- "father"
+    names(data_trio_exp_i_mother) <- c("snps", "expose", "family_id")
+    data_trio_exp_i_mother$family_role <- "mother"
+    names(data_trio_exp_i_offspring) <- c("snps", "expose", "family_id")
+    data_trio_exp_i_offspring$family_role <- "offspring"
+    # 给这个几个长数据生成，协变量
+    data_trio_exp_i_offspring$g_snps <- data_trio_exp_i_mother$snps +
+      data_trio_exp_i_father$snps
+    data_trio_exp_i_father$g_snps <- data_trio_exp_i_father$snps + 2 * f
+    data_trio_exp_i_mother$g_snps <- data_trio_exp_i_mother$snps + 2 * f
+    # 合成起来
+    data_trio_exp_i_long <- bind_rows(data_trio_exp_i_father, data_trio_exp_i_mother, data_trio_exp_i_offspring)
+    data_trio_exp_i_long <- arrange(data_trio_exp_i_long, family_id)
+    # 重命名然后合并两种数据
+    data_i_long <- bind_rows(
+      data_independent_exp_i %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "expose"),
+      data_trio_exp_i_long %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "expose")
+    )
+    # 得到了这个长数据
+    data_i_long <- arrange(data_i_long, family_id)
+    data_lmm <- perform_lmm_analysis(data_i_long, include_intercept = TRUE)
+
+    beta_hat_exp[i, ] <- fixef(data_lmm$model)[c(2, 3)]
+    beta_sigma_exp[snps_matrix_indicator, ] <- data_lmm$information_matrix[2:3, 2:3]
+
+    # 针对 data_set 中 out 的部分进行相同的处理
+    data_independent_out_i <- data_set[[3]] %>%
+      dplyr::select(snps = ends_with(snps_indicator), outcome = ends_with("_outcome")) %>%
+      dplyr::mutate(
+        family_id = 1:n(),
+        family_role = "independent"
+      )
+
+    data_trio_out_i <- data_set[[4]] %>%
+      dplyr::select(ends_with(snps_indicator), ends_with("_outcome"))
+    names(data_trio_out_i)[1] <- "father_snps"
+    names(data_trio_out_i)[2] <- "mother_snps"
+    names(data_trio_out_i)[3] <- "offspring_snps"
+    # 求一下次等位基因频率
+    f_out <- (mean(data_independent_out_i$snps) / 2 +
+      mean(c(data_trio_out_i$offspring_snps, data_trio_out_i$mother_snps)) / 2) / 2
+
+    # 进行填补
+    data_independent_out_i <- data_independent_out_i %>%
+      dplyr::mutate(g_snps = snps + 2 * f_out)
+
+    # 提取3个人并分开
+    data_trio_out_i_father <- data_trio_out_i %>% dplyr::select("father_snps", "father_outcome")
+    data_trio_out_i_father$family_id <-
+      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) + nrow(data_trio_out_i_father))
+    data_trio_out_i_mother <- data_trio_out_i %>% dplyr::select("mother_snps", "mother_outcome")
+    data_trio_out_i_mother$family_id <-
+      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) + nrow(data_trio_out_i_father))
+    data_trio_out_i_offspring <- data_trio_out_i %>% dplyr::select("offspring_snps", "offspring_outcome")
+    data_trio_out_i_offspring$family_id <-
+      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) + nrow(data_trio_out_i_father))
+    # 给他们都变成长数据然后拼起来
+    names(data_trio_out_i_father) <- c("snps", "outcome", "family_id")
+    data_trio_out_i_father$family_role <- "father"
+    names(data_trio_out_i_mother) <- c("snps", "outcome", "family_id")
+    data_trio_out_i_mother$family_role <- "mother"
+    names(data_trio_out_i_offspring) <- c("snps", "outcome", "family_id")
+    data_trio_out_i_offspring$family_role <- "offspring"
+    # 给这个几个长数据生成，协变量
+    data_trio_out_i_offspring$g_snps <- data_trio_out_i_mother$snps +
+      data_trio_out_i_father$snps
+    data_trio_out_i_father$g_snps <- data_trio_out_i_father$snps + 2 * f_out
+    data_trio_out_i_mother$g_snps <- data_trio_out_i_mother$snps + 2 * f_out
+    # 合成起来
+    data_trio_out_i_long <- bind_rows(data_trio_out_i_father, data_trio_out_i_mother, data_trio_out_i_offspring)
+    data_trio_out_i_long <- arrange(data_trio_out_i_long, desc(family_id))
+    # 重命名然后合并两种数据
+    data_i_long_out <- bind_rows(
+      data_independent_out_i %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "outcome"),
+      data_trio_out_i_long %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "outcome")
+    )
+    # 得到了这个长数据
+    data_i_long_out <- arrange(data_i_long_out, family_id)
+    data_lmm_out <- perform_lmm_analysis(data_i_long_out, include_intercept = TRUE, response_var_name = "outcome")
+
+    beta_hat_out[i, ] <- fixef(data_lmm_out$model)[c(2, 3)]
+    beta_sigma_out[snps_matrix_indicator, ] <- data_lmm_out$information_matrix[2:3, 2:3]
+  }
+
+  return(list(
+    beta_hat_exp = beta_hat_exp,
+    beta_hat_out = beta_hat_out,
+    beta_sigma_exp = beta_sigma_exp,
+    beta_sigma_out = beta_sigma_out
+  ))
+}
+# 对 data_i_long 进行 LMM 分析
+perform_lmm_analysis <- function(data_i_long, correlation_structure = NULL, include_intercept = TRUE, response_var_name = "expose") {
+  # 确保加载了 nlme 和 dplyr 包
+  suppressPackageStartupMessages({
+    library(nlme)
+    library(dplyr)
+  })
+
+  # 将 family_id 转换为因子，以便 nlme 正确处理分组
+  data_i_long$family_id <- as.factor(data_i_long$family_id)
+
+  # 构建固定效应公式
+  fixed_formula_str <- if (include_intercept) {
+    paste(response_var_name, "~ snps + g_snps")
+  } else {
+    paste(response_var_name, "~ 0 + snps + g_snps")
+  }
+  fixed_formula <- as.formula(fixed_formula_str)
+
+  # 根据用户需求设置相关结构
+  if (is.null(correlation_structure)) {
+    # 默认使用对称相关性，并估计所有相关参数
+    corr_obj <- corSymm(form = ~ 1 | family_id, fixed = FALSE)
+  } else {
+    # 使用用户提供的相关结构
+    corr_obj <- correlation_structure
+  }
+
+  lmm_model <- tryCatch(
+    {
+      lme(
+        fixed = fixed_formula, # 使用动态构建的公式
+        random = ~ 1 | family_id,
+        correlation = corr_obj,
+        data = data_i_long,
+        control = lmeControl(opt = "optim") # 尝试使用不同的优化器
+      )
+    },
+    error = function(e) {
+      warning("LMM 模型拟合失败: ", e$message)
+      return(NULL)
+    }
+  )
+
+  if (is.null(lmm_model)) {
+    return(list(summary = "LMM 模型拟合失败。", model = NULL, information_matrix = NULL))
+  }
+
+  # 提取固定效应的协方差矩阵
+  vcov_fixed <- vcov(lmm_model)
+
+  # 计算信息矩阵 (协方差矩阵的逆)
+  information_matrix <- tryCatch(
+    {
+      solve(vcov_fixed)
+    },
+    error = function(e) {
+      warning("信息矩阵计算失败: ", e$message)
+      return(NULL)
+    }
+  )
+
+  # 返回模型摘要、模型对象和信息矩阵
+  return(list(summary = summary(lmm_model), model = lmm_model, information_matrix = information_matrix))
+}
