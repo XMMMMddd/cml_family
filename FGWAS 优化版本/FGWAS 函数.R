@@ -238,10 +238,8 @@ fgwas_to_mr <- function(results_of_fgwas) {
 # results_of_fgwas <- cML_hat_expose_optimized(a[[1]])
 # fgwas_to_MR(results_of_fgwas)
 
-# %% FGWAS 一个大数据
-test <- generate_mr_trio_data_ultra()
 
-test_1 <- perform_fgwas_analysis(test,n_snps = 3)
+
 # 新增函数：封装 FGWAS 分析过程
 perform_fgwas_analysis <- function(data_set, n_snps) {
   # 确保加载了必要的包

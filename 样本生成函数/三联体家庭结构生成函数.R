@@ -1186,6 +1186,47 @@ generate_mr_trio_data_ultra <- function(
 }
 
 
+#' @title 生成模拟的三代家系遗传数据（升级版）
+#' @description 生成模拟数据以研究孟德尔随机化中的因果关系，
+#'              包括暴露和结局的复杂遗传效应、混杂因素及选型婚配机制。
+#'              此函数生成的数据可用于评估基因多效性、人群分层和选型婚配对因果推断的影响。
+#'
+#' @param n_snps 整数型。SNP的数量。
+#' @param n_pleiotropy 整数型。具有潜在多效性的SNP数量。
+#' @param n_independent 整数型。独立个体的数量。
+#' @param p_trio 数值型。在暴露组和结局组中三联体样本的比例。
+#' @param p_exp_out 数值型。暴露组和结局组之间的重叠比例。
+#' @param p_f 数值型。父系来源的等位基因频率或基准频率。
+#' @param p_m 数值型。母系来源的等位基因频率或基准频率。
+#' @param beta_fs_oe_exp 数值型。父亲SNP对子代暴露的效应大小。
+#' @param beta_ms_oe_exp 数值型。母亲SNP对子代暴露的效应大小。
+#' @param beta_os_oe_exp 数值型。子代自身SNP对子代暴露的效应大小。
+#' @param beta_fs_oe_out 数值型。父亲SNP对子代结局的效应大小。
+#' @param beta_ms_oe_out 数值型。母亲SNP对子代结局的效应大小。
+#' @param beta_os_oe_out 数值型。子代自身SNP对子代结局的效应大小。
+#' @param p_negative_pleiotropy 数值型。指定多效性SNP中负向效应的比例。
+#' @param beta_exp_to_out 数值型。暴露对结局的真实因果效应。
+#' @param var_confounding_exp 数值型。影响暴露的混杂因素的方差。
+#' @param var_confounding_out 数值型。影响结局的混杂因素的方差。
+#' @param r_correlation 数值型。共享环境因素的方差。
+#' @param n_seed 整数型。随机数种子，以确保结果可重复。
+#' @param assortative_mating_strength 数值型。选型婚配强度参数。
+#'
+#' @return 一个列表，包含四个数据框：
+#'         \describe{
+#'           \item{data_independent_exp}{暴露组的独立个体数据}
+#'           \item{data_trio_exp}{暴露组的三联体家庭数据}
+#'           \item{data_independent_out}{结局组的独立个体数据}
+#'           \item{data_trio_out}{结局组的三联体家庭数据}
+#'         }
+#' @examples
+#' # 生成默认参数下的模拟数据
+#' simulated_data <- generate_mr_trio_data_ultra_updata(n_snps = 3, n_pleiotropy = 1)
+#' # 查看暴露组的独立个体数据
+#' head(simulated_data$data_independent_exp)
+#' # 查看结局组的三联体家庭数据
+#' head(simulated_data$data_trio_out)
+
 generate_mr_trio_data_ultra_updata <- function(
     n_snps = 3, n_pleiotropy = 1,
     n_independent = 1000, p_trio = 0.5,

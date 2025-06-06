@@ -38,10 +38,7 @@
   "C_Cpp_Runner.compilerArgs": [],
   "C_Cpp_Runner.linkerArgs": [],
   "C_Cpp_Runner.includePaths": [],
-  "C_Cpp_Runner.includeSearch": [
-    "*",
-    "**/*"
-  ],
+  "C_Cpp_Runner.includeSearch": ["*", "**/*"],
   "C_Cpp_Runner.excludeSearch": [
     "**/build",
     "**/build/**",
@@ -55,5 +52,33 @@
   "C_Cpp_Runner.useLeakSanitizer": false,
   "C_Cpp_Runner.showCompilationTime": false,
   "C_Cpp_Runner.useLinkTimeOptimization": false,
-  "C_Cpp_Runner.msvcSecureNoWarnings": false
+  "C_Cpp_Runner.msvcSecureNoWarnings": false,
+  "editor.tokenColorCustomizations": {
+    "textMateRules": [
+      {
+        "scope": "meta.function-call.r",
+        "settings": {
+          "foreground": "#56B6C2" // 换成你想要的任何颜色
+        }
+      },
+      {
+        "scope": "meta.function-call.arguments.r",
+        "settings": {
+          "foreground": "#c68af4aa" // 换成你想要的任何颜色
+        }
+      },
+      {
+        "scope": "source.r",
+        "settings": {
+          "foreground": "#E06C75" // 换成你想要的任何颜色
+        }
+      }	,
+      {
+        "scope": "variable.parameter.function.language.r",
+        "settings": {
+          "foreground": "#E06C75" // 换成你想要的任何颜色
+        }
+      }
+    ]
+  }
 }
