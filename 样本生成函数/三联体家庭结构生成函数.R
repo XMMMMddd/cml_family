@@ -9,8 +9,7 @@ library(MASS)
     return(matrix(1, nrow = 1, ncol = 1))
   }
 
-  if (correlation_type == "independent") {
-    # 不相关的 SNPs，生成单位矩阵
+  if (correlation_type == "independent") {    # 不相关的 SNPs，生成单位矩阵
     corr_matrix <- diag(n_snps)
   } else if (correlation_type == "equicorrelated") {
     # 所有 SNP 之间具有相同的相关系数 rho

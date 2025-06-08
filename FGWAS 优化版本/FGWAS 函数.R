@@ -226,10 +226,10 @@ fgwas_for_data_optimized <- function(data_df,
 # 把 fgwas 的结果弄成好处理的
 fgwas_to_mr <- function(results_of_fgwas) {
   results_of_fgwas_beta <- matrix(results_of_fgwas$beta_hat, ncol = 2)[, 1]
-  beta_se <- rep(0, length(results_of_fgwas_beta))
-  for (i in 1:length(results_of_fgwas_beta)) {
+  beta_se <- rep(0, nrow(results_of_fgwas$beta_hat))
+  for (i in 1:nrow(results_of_fgwas$beta_hat)) {
     current_sigma_i <- (2 * i - 1):(2 * i)
-    current_sigma <- results_of_fgwas$Sigma_inv[current_sigma_i, ]
+    current_sigma <- results_of_fgwas$sigma_inv[current_sigma_i, ]
     beta_se[i] <- sqrt(solve(current_sigma)[1, 1])
   }
   return(list(results_of_fgwas_beta = results_of_fgwas_beta, beta_se = beta_se))
@@ -347,13 +347,17 @@ perform_fgwas_analysis <- function(data_set, n_snps) {
     # 提取3个人并分开
     data_trio_out_i_father <- data_trio_out_i %>% dplyr::select("father_snps", "father_outcome")
     data_trio_out_i_father$family_id <-
-      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) + nrow(data_trio_out_i_father))
-    data_trio_out_i_mother <- data_trio_out_i %>% dplyr::select("mother_snps", "mother_outcome")
+      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) +
+        nrow(data_trio_out_i_father))
+    data_trio_out_i_mother <- data_trio_out_i %>%
+      dplyr::select("mother_snps", "mother_outcome")
     data_trio_out_i_mother$family_id <-
       (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) + nrow(data_trio_out_i_father))
-    data_trio_out_i_offspring <- data_trio_out_i %>% dplyr::select("offspring_snps", "offspring_outcome")
+    data_trio_out_i_offspring <- data_trio_out_i %>%
+      dplyr::select("offspring_snps", "offspring_outcome")
     data_trio_out_i_offspring$family_id <-
-      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) + nrow(data_trio_out_i_father))
+      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) +
+        nrow(data_trio_out_i_father))
     # 给他们都变成长数据然后拼起来
     names(data_trio_out_i_father) <- c("snps", "outcome", "family_id")
     data_trio_out_i_father$family_role <- "father"
@@ -379,7 +383,8 @@ perform_fgwas_analysis <- function(data_set, n_snps) {
     data_lmm_out <- perform_lmm_analysis(data_i_long_out, include_intercept = TRUE, response_var_name = "outcome")
 
     beta_hat_out[i, ] <- fixef(data_lmm_out$model)[c(2, 3)]
-    beta_sigma_out[snps_matrix_indicator, ] <- data_lmm_out$information_matrix[2:3, 2:3]
+    beta_sigma_out[snps_matrix_indicator, ] <-
+      data_lmm_out$information_matrix[2:3, 2:3]
   }
 
   return(list(
@@ -390,7 +395,9 @@ perform_fgwas_analysis <- function(data_set, n_snps) {
   ))
 }
 # 对 data_i_long 进行 LMM 分析
-perform_lmm_analysis <- function(data_i_long, correlation_structure = NULL, include_intercept = TRUE, response_var_name = "expose") {
+perform_lmm_analysis <- function(
+    data_i_long, correlation_structure = NULL,
+    include_intercept = TRUE, response_var_name = "expose") {
   # 确保加载了 nlme 和 dplyr 包
   suppressPackageStartupMessages({
     library(nlme)
