@@ -651,7 +651,8 @@ robust_cml_fit <- function(
 cml_family_overlap_2 <- function(
     n_snps, beta_hat_exp, beta_hat_out,
     matrix_big,
-    max_iter = 100, tol = 1e-6, n_starts = 5, alpha_start_range = c(-0.5, 0.5),
+    max_iter = 100, tol = 1e-6, n_starts = 5,
+    alpha_start_range = c(-0.01, 0.01),
     digits = 4) {
     # 生成组合列表
     if (n_snps > 1) {
@@ -682,8 +683,9 @@ cml_family_overlap_2 <- function(
         cml_fit_i <- robust_cml_fit(
             n_snps, beta_hat_exp, beta_hat_out,
             matrix_big, a_legal_i, b_legal_i,
-            max_iter = 100, tol = 1e-6, n_starts = 20, alpha_start_range = c(-0.5, 0.5),
-            digits = 4
+            max_iter = max_iter, tol = tol, n_starts = n_starts,
+            alpha_start_range =  alpha_start_range,
+            digits = digits
         )
         legal_pairs_table$alpha[i] <- cml_fit_i$alpha_new
         # 准备方差计算的输入
@@ -710,23 +712,37 @@ cml_family_overlap_2 <- function(
             b = n_snps - b_legal_i
         )
     }
-    # 乘以 -0.5 是 BIC 权重计算的标准方法
-    weights <- exp(-(legal_pairs_table$bic))
+    #
+    weights <- exp(-(legal_pairs_table$bic / 2))
 
     # 归一化权重
-    normalized_weights <- weights / sum(weights)
-    legal_pairs_table$weight <- normalized_weights
+    # 在 R 中，is.na() 函数可以同时检测 NA 和 NaN，这通常是更稳健的做法。
+    valid_rows_filter <- !is.na(legal_pairs_table$alpha_se)
 
-    # 计算加权 alpha
-    weighted_alpha <- sum(legal_pairs_table$weight * legal_pairs_table$alpha)
+    # 2. 根据过滤器筛选出有效的数据表和对应的原始权重
+    # 后续的所有计算都将基于这个有效子集 (valid_table)
+    valid_table <- legal_pairs_table[valid_rows_filter, ]
+    valid_weights <- weights[valid_rows_filter]
 
-    weighted_variance <- sum(legal_pairs_table$weight *
-        (legal_pairs_table$alpha_se))
-    weighted_se <- weighted_variance
-    result <- list(
-        weighted_alpha = weighted_alpha,
-        weighted_se = weighted_se,
-        legal_pairs_table = legal_pairs_table
-    )
-    return(result)
+    # 3. 检查是否存在有效行，以防止因数据为空而出错
+    if (nrow(valid_table) > 0 && sum(valid_weights, na.rm = TRUE) > 0) {
+        # 4. 对筛选后的有效权重进行归一化
+        # 注意：分母现在是有效权重的总和
+        normalized_weights <- valid_weights / sum(valid_weights)
+        valid_table$weight <- normalized_weights
+
+        # 5. 计算加权 alpha (仅使用有效数据)
+        weighted_alpha <- sum(valid_table$weight * valid_table$alpha)
+
+        # 6. 计算加权标准误 (沿用您原有的加权方式)
+        # 这实际上是标准误（alpha_se）的加权平均值
+        weighted_se <- sum(valid_table$weight * sqrt((valid_table$alpha_se)^2 +
+            (valid_table$alpha - weighted_alpha)^2))
+        result <- list(
+            weighted_alpha = weighted_alpha,
+            weighted_se = weighted_se,
+            legal_pairs_table = legal_pairs_table
+        )
+        return(result)
+    }
 }
