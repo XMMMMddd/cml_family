@@ -234,12 +234,15 @@ fgwas_for_data_optimized <- function(data_df,
 fgwas_to_mr <- function(results_of_fgwas) {
   results_of_fgwas_beta <- matrix(results_of_fgwas$beta_hat, ncol = 2)[, 1]
   beta_se <- rep(0, nrow(results_of_fgwas$beta_hat))
+  beta_se_p <- rep(0, nrow(results_of_fgwas$beta_hat))
   for (i in 1:nrow(results_of_fgwas$beta_hat)) {
     current_sigma_i <- (2 * i - 1):(2 * i)
     current_sigma <- results_of_fgwas$sigma_inv[current_sigma_i, ]
-    beta_se[i] <- sqrt(solve(current_sigma)[1, 1])
+    current_sigma_inv <- solve(current_sigma)
+    beta_se[i] <- sqrt(current_sigma_inv[1, 1])
+    beta_se_p[i] <- sqrt(current_sigma_inv[2, 2])
   }
-  return(list(results_of_fgwas_beta = results_of_fgwas_beta, beta_se = beta_se))
+  return(list(results_of_fgwas_beta = results_of_fgwas_beta, beta_se = beta_se, beta_se_p = beta_se_p))
 }
 # a <- generate_multiple_datasets_v3()
 # results_of_fgwas <- cML_hat_expose_optimized(a[[1]])
@@ -248,159 +251,6 @@ fgwas_to_mr <- function(results_of_fgwas) {
 
 # %% 新增函数：封装 FGWAS 分析过程 一类错误膨胀
 
-perform_fgwas_analysis <- function(data_set, n_snps) {
-  # 确保加载了必要的包
-  suppressPackageStartupMessages({
-    library(dplyr)
-    library(nlme)
-  })
-
-
-  # 动态确定 n_snps
-  # 假设 snps 列的命名模式是 "snps.1", "snps.2", ...
-
-
-  if (n_snps == 0) {
-    stop("未在 data_set[[1]] (data_independent_exp) 中找到 snps 列，无法确定 n_snps。")
-  }
-
-  beta_hat_exp <- matrix(0, nrow = n_snps, ncol = 2)
-  beta_hat_out <- matrix(0, nrow = n_snps, ncol = 2)
-
-  beta_sigma_exp <- matrix(0, nrow = 2 * n_snps, ncol = 2)
-  beta_sigma_out <- matrix(0, nrow = 2 * n_snps, ncol = 2)
-
-  for (i in 1:n_snps) {
-    snps_matrix_indicator <- (2 * i - 1):(2 * i)
-    snps_indicator <- paste0("snps.", i)
-    data_independent_exp_i <- data_set[[1]] %>%
-      dplyr::select(snps = ends_with(snps_indicator), expose = ends_with("expose")) %>%
-      dplyr::mutate(
-        family_id = 1:n(),
-        family_role = "independent"
-      )
-
-    data_trio_exp_i <- data_set[[2]] %>%
-      dplyr::select(ends_with(snps_indicator), ends_with("expose"))
-    names(data_trio_exp_i)[1] <- "father_snps"
-    names(data_trio_exp_i)[2] <- "mother_snps"
-    names(data_trio_exp_i)[3] <- "offspring_snps"
-    # 求一下次等位基因频率
-    f <- (mean(data_independent_exp_i$snps) / 2 +
-      mean(c(data_trio_exp_i$offspring_snps, data_trio_exp_i$mother_snps)) / 2) / 2
-
-    # 进行填补
-    data_independent_exp_i <- data_independent_exp_i %>%
-      dplyr::mutate(g_snps = snps + 2 * f)
-
-    # 提取3个人并分开
-    data_trio_exp_i_father <- data_trio_exp_i %>% dplyr::select("father_snps", "father_expose")
-    data_trio_exp_i_father$family_id <-
-      (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) + nrow(data_trio_exp_i_father))
-    data_trio_exp_i_mother <- data_trio_exp_i %>% dplyr::select("mother_snps", "mother_expose")
-    data_trio_exp_i_mother$family_id <-
-      (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) + nrow(data_trio_exp_i_father))
-    data_trio_exp_i_offspring <- data_trio_exp_i %>% dplyr::select("offspring_snps", "offspring_expose")
-    data_trio_exp_i_offspring$family_id <-
-      (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) + nrow(data_trio_exp_i_father))
-    # 给他们都变成长数据然后拼起来
-    names(data_trio_exp_i_father) <- c("snps", "expose", "family_id")
-    data_trio_exp_i_father$family_role <- "father"
-    names(data_trio_exp_i_mother) <- c("snps", "expose", "family_id")
-    data_trio_exp_i_mother$family_role <- "mother"
-    names(data_trio_exp_i_offspring) <- c("snps", "expose", "family_id")
-    data_trio_exp_i_offspring$family_role <- "offspring"
-    # 给这个几个长数据生成，协变量
-    data_trio_exp_i_offspring$g_snps <- data_trio_exp_i_mother$snps +
-      data_trio_exp_i_father$snps
-    data_trio_exp_i_father$g_snps <- data_trio_exp_i_father$snps + 2 * f
-    data_trio_exp_i_mother$g_snps <- data_trio_exp_i_mother$snps + 2 * f
-    # 合成起来
-    data_trio_exp_i_long <- bind_rows(data_trio_exp_i_father, data_trio_exp_i_mother, data_trio_exp_i_offspring)
-    data_trio_exp_i_long <- arrange(data_trio_exp_i_long, family_id)
-    # 重命名然后合并两种数据
-    data_i_long <- bind_rows(
-      data_independent_exp_i %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "expose"),
-      data_trio_exp_i_long %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "expose")
-    )
-    # 得到了这个长数据
-    data_i_long <- arrange(data_i_long, family_id)
-    data_lmm <- perform_lmm_analysis(data_i_long, include_intercept = TRUE)
-
-    beta_hat_exp[i, ] <- fixef(data_lmm$model)[c(2, 3)]
-    beta_sigma_exp[snps_matrix_indicator, ] <- data_lmm$information_matrix[2:3, 2:3]
-
-    # 针对 data_set 中 out 的部分进行相同的处理
-    data_independent_out_i <- data_set[[3]] %>%
-      dplyr::select(snps = ends_with(snps_indicator), outcome = ends_with("_outcome")) %>%
-      dplyr::mutate(
-        family_id = 1:n(),
-        family_role = "independent"
-      )
-
-    data_trio_out_i <- data_set[[4]] %>%
-      dplyr::select(ends_with(snps_indicator), ends_with("_outcome"))
-    names(data_trio_out_i)[1] <- "father_snps"
-    names(data_trio_out_i)[2] <- "mother_snps"
-    names(data_trio_out_i)[3] <- "offspring_snps"
-    # 求一下次等位基因频率
-    f_out <- (mean(data_independent_out_i$snps) / 2 +
-      mean(c(data_trio_out_i$offspring_snps, data_trio_out_i$mother_snps)) / 2) / 2
-
-    # 进行填补
-    data_independent_out_i <- data_independent_out_i %>%
-      dplyr::mutate(g_snps = snps + 2 * f_out)
-
-    # 提取3个人并分开
-    data_trio_out_i_father <- data_trio_out_i %>% dplyr::select("father_snps", "father_outcome")
-    data_trio_out_i_father$family_id <-
-      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) +
-        nrow(data_trio_out_i_father))
-    data_trio_out_i_mother <- data_trio_out_i %>%
-      dplyr::select("mother_snps", "mother_outcome")
-    data_trio_out_i_mother$family_id <-
-      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) + nrow(data_trio_out_i_father))
-    data_trio_out_i_offspring <- data_trio_out_i %>%
-      dplyr::select("offspring_snps", "offspring_outcome")
-    data_trio_out_i_offspring$family_id <-
-      (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) +
-        nrow(data_trio_out_i_father))
-    # 给他们都变成长数据然后拼起来
-    names(data_trio_out_i_father) <- c("snps", "outcome", "family_id")
-    data_trio_out_i_father$family_role <- "father"
-    names(data_trio_out_i_mother) <- c("snps", "outcome", "family_id")
-    data_trio_out_i_mother$family_role <- "mother"
-    names(data_trio_out_i_offspring) <- c("snps", "outcome", "family_id")
-    data_trio_out_i_offspring$family_role <- "offspring"
-    # 给这个几个长数据生成，协变量
-    data_trio_out_i_offspring$g_snps <- data_trio_out_i_mother$snps +
-      data_trio_out_i_father$snps
-    data_trio_out_i_father$g_snps <- data_trio_out_i_father$snps + 2 * f_out
-    data_trio_out_i_mother$g_snps <- data_trio_out_i_mother$snps + 2 * f_out
-    # 合成起来
-    data_trio_out_i_long <- bind_rows(data_trio_out_i_father, data_trio_out_i_mother, data_trio_out_i_offspring)
-    data_trio_out_i_long <- arrange(data_trio_out_i_long, desc(family_id))
-    # 重命名然后合并两种数据
-    data_i_long_out <- bind_rows(
-      data_independent_out_i %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "outcome"),
-      data_trio_out_i_long %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "outcome")
-    )
-    # 得到了这个长数据
-    data_i_long_out <- arrange(data_i_long_out, family_id)
-    data_lmm_out <- perform_lmm_analysis(data_i_long_out, include_intercept = TRUE, response_var_name = "outcome")
-
-    beta_hat_out[i, ] <- fixef(data_lmm_out$model)[c(2, 3)]
-    beta_sigma_out[snps_matrix_indicator, ] <-
-      data_lmm_out$information_matrix[2:3, 2:3]
-  }
-
-  return(list(
-    beta_hat_exp = beta_hat_exp,
-    beta_hat_out = beta_hat_out,
-    beta_sigma_exp = beta_sigma_exp,
-    beta_sigma_out = beta_sigma_out
-  ))
-}
 perform_fgwas_analysis_lmm <- function(data_set, n_snps) {
   # 确保加载了必要的包
   suppressPackageStartupMessages({
@@ -679,341 +529,117 @@ perform_lmm_analysis_v2 <- function(
   return(list(model = lmm_model, vcov_matrix = vcov_matrix))
 }
 
-# %% 测试一下协方差结构
-phase_two_data_full <- generate_mr_trio_data_ultra_updata(
-  n_independent = 2000,
-  p_trio = 0.9,
-  beta_fs_oe_exp = 0.9,
-  beta_ms_oe_exp = 0.9, beta_os_oe_exp = 0.9, beta_exp_to_out = 0
-)
-test_gls <- perform_fgwas_analysis_lmm(phase_two_data_full, n_snps = 3)
-test_gls$beta_hat_out
-test_gls$beta_hat_exp
-
-
-phase_two_data_analysis_out <- list(
-  beta_hat =
-    test_gls$beta_hat_out,
-  sigma_inv =
-    test_gls$beta_sigma_out
-)
-
-phase_two_data_analysis_out <- fgwas_to_mr(
-  phase_two_data_analysis_out
-)
-phase_two_data_analysis_out$p_value <-
-  2 * pnorm(abs(
-    phase_two_data_analysis_out$results_of_fgwas_beta /
-      phase_two_data_analysis_out$beta_se
-  ), lower.tail = FALSE)
-phase_two_data_analysis_out$p_value
-
 # %% 测试一下这个gls是不是对的
 
 
-n_simulations <- 1000 # 您想运行的总次数
-n_p_values <- 7 # 您要统计的p值的个数
-set.seed(123) # 设置随机数种子以保证结果可复现
+# n_simulations <- 1000 # 您想运行的总次数
+# n_p_values <- 7 # 您要统计的p值的个数
+# set.seed(123) # 设置随机数种子以保证结果可复现
 
-run_one_simulation <- function() {
-  phase_two_data_full <- generate_mr_trio_data_ultra_updata(
-    n_independent = 2000, p_trio = 0.9, beta_fs_oe_exp = 0.9,
-    beta_ms_oe_exp = 0.9, beta_os_oe_exp = 0.9, beta_exp_to_out = 0
-  )
-  test_gls <- perform_fgwas_analysis_lmm(phase_two_data_full, n_snps = 3)
-  phase_two_data_analysis_out <- list(
-    beta_hat = test_gls$beta_hat_out, sigma_inv = test_gls$beta_sigma_out
-  )
-  phase_two_data_analysis_out <- fgwas_to_mr(phase_two_data_analysis_out)
-  phase_two_data_analysis_out$p_value <-
-    2 * pnorm(abs(
-      phase_two_data_analysis_out$results_of_fgwas_beta /
-        phase_two_data_analysis_out$beta_se
-    ), lower.tail = FALSE)
+# run_one_simulation <- function() {
+#   phase_two_data_full <- generate_mr_trio_data_ultra_updata(
+#     n_independent = 2000, p_trio = 0.9, beta_fs_oe_exp = 0.9,
+#     beta_ms_oe_exp = 0.9, beta_os_oe_exp = 0.9, beta_exp_to_out = 0
+#   )
+#   test_gls <- perform_fgwas_analysis_lmm(phase_two_data_full, n_snps = 3)
+#   phase_two_data_analysis_out <- list(
+#     beta_hat = test_gls$beta_hat_out, sigma_inv = test_gls$beta_sigma_out
+#   )
+#   phase_two_data_analysis_out <- fgwas_to_mr(phase_two_data_analysis_out)
+#   phase_two_data_analysis_out$p_value <-
+#     2 * pnorm(abs(
+#       phase_two_data_analysis_out$results_of_fgwas_beta /
+#         phase_two_data_analysis_out$beta_se
+#     ), lower.tail = FALSE)
 
-  f_out <- mean(c(
-    phase_two_data_full$data_trio_out$offspring_snps.1,
-    phase_two_data_full$data_trio_out$mother_snps.1
-  )) / 2
-  g_snps_1 <- phase_two_data_full$data_trio_out$mother_snps.1 +
-    phase_two_data_full$data_trio_out$father_snps.1
-  g_snps_2 <- phase_two_data_full$data_trio_out$mother_snps.1 + 2 * f_out
-  g_snps_3 <- phase_two_data_full$data_trio_out$father_snps.1 + 2 * f_out
+#   f_out <- mean(c(
+#     phase_two_data_full$data_trio_out$offspring_snps.1,
+#     phase_two_data_full$data_trio_out$mother_snps.1
+#   )) / 2
+#   g_snps_1 <- phase_two_data_full$data_trio_out$mother_snps.1 +
+#     phase_two_data_full$data_trio_out$father_snps.1
+#   g_snps_2 <- phase_two_data_full$data_trio_out$mother_snps.1 + 2 * f_out
+#   g_snps_3 <- phase_two_data_full$data_trio_out$father_snps.1 + 2 * f_out
 
-  reference_p_value_1 <- summary(lm(
-    phase_two_data_full$data_trio_out$offspring_outcome ~
-      phase_two_data_full$data_trio_out$offspring_snps.1
-  ))$coefficients[8]
+#   reference_p_value_1 <- summary(lm(
+#     phase_two_data_full$data_trio_out$offspring_outcome ~
+#       phase_two_data_full$data_trio_out$offspring_snps.1
+#   ))$coefficients[8]
 
-  reference_p_value_2 <- summary(lm(
-    phase_two_data_full$data_trio_out$mother_outcome ~
-      phase_two_data_full$data_trio_out$mother_snps.1
-  ))$coefficients[8]
-  reference_p_value_3 <- summary(lm(
-    phase_two_data_full$data_trio_out$father_outcome ~
-      phase_two_data_full$data_trio_out$father_snps.1
-  ))$coefficients[8]
+#   reference_p_value_2 <- summary(lm(
+#     phase_two_data_full$data_trio_out$mother_outcome ~
+#       phase_two_data_full$data_trio_out$mother_snps.1
+#   ))$coefficients[8]
+#   reference_p_value_3 <- summary(lm(
+#     phase_two_data_full$data_trio_out$father_outcome ~
+#       phase_two_data_full$data_trio_out$father_snps.1
+#   ))$coefficients[8]
 
-  reference_p_value_5 <- summary(lm(
-    phase_two_data_full$data_independent_out$offspring_outcome ~
-      phase_two_data_full$data_independent_out$offspring_snps.1
-  ))$coefficients[8]
+#   reference_p_value_5 <- summary(lm(
+#     phase_two_data_full$data_independent_out$offspring_outcome ~
+#       phase_two_data_full$data_independent_out$offspring_snps.1
+#   ))$coefficients[8]
 
-  phase_two_data_analysis_out$p_value <- c(
-    phase_two_data_analysis_out$p_value,
-    reference_p_value_1, reference_p_value_2,
-    reference_p_value_3, reference_p_value_5
-  )
-  return(phase_two_data_analysis_out$p_value < 0.05)
-}
+#   phase_two_data_analysis_out$p_value <- c(
+#     phase_two_data_analysis_out$p_value,
+#     reference_p_value_1, reference_p_value_2,
+#     reference_p_value_3, reference_p_value_5
+#   )
+#   return(phase_two_data_analysis_out$p_value < 0.05)
+# }
 
-n_cores <- detectCores() - 1
-if (n_cores < 1) n_cores <- 1
-cat("使用", n_cores, "个核心进行并行计算...\n")
+# n_cores <- detectCores() - 1
+# if (n_cores < 1) n_cores <- 1
+# cat("使用", n_cores, "个核心进行并行计算...\n")
 
-# 创建集群
-cl <- makeCluster(n_cores)
+# # 创建集群
+# cl <- makeCluster(n_cores)
 
-# 定义需要在每个核心上加载的包和导出的函数
-packages_to_load <- c("dplyr", "MASS", "nlme", "lme4") # <-- 已根据您的要求更新
-functions_to_export <- c(
-  "generate_mr_trio_data_ultra_updata",
-  "perform_fgwas_analysis_lmm",
-  "fgwas_to_mr",
-  "run_one_simulation",
-  "perform_lmm_analysis_v2"
-)
+# # 定义需要在每个核心上加载的包和导出的函数
+# packages_to_load <- c("dplyr", "MASS", "nlme", "lme4") # <-- 已根据您的要求更新
+# functions_to_export <- c(
+#   "generate_mr_trio_data_ultra_updata",
+#   "perform_fgwas_analysis_lmm",
+#   "fgwas_to_mr",
+#   "run_one_simulation",
+#   "perform_lmm_analysis_v2"
+# )
 
-tryCatch({
-  # 第一步：将 'packages_to_load' 向量本身导出到每个工作核心
-  clusterExport(cl, "packages_to_load")
+# tryCatch({
+#   # 第一步：将 'packages_to_load' 向量本身导出到每个工作核心
+#   clusterExport(cl, "packages_to_load")
 
-  # 第二步：现在，每个核心都有了 packages_to_load 向量，可以执行加载命令了
-  clusterEvalQ(cl, lapply(packages_to_load, library, character.only = TRUE))
-  cat("依赖包 (dplyr, MASS, nlme) 已在所有核心上加载。\n")
+#   # 第二步：现在，每个核心都有了 packages_to_load 向量，可以执行加载命令了
+#   clusterEvalQ(cl, lapply(packages_to_load, library, character.only = TRUE))
+#   cat("依赖包 (dplyr, MASS, nlme) 已在所有核心上加载。\n")
 
-  # 第三步：导出您自己的函数到每个工作进程
-  clusterExport(cl, varlist = functions_to_export)
-  cat("自定义函数已成功导出到所有核心。\n")
+#   # 第三步：导出您自己的函数到每个工作进程
+#   clusterExport(cl, varlist = functions_to_export)
+#   cat("自定义函数已成功导出到所有核心。\n")
 
-  # 第四步：使用 pblapply 进行并行计算
-  cat("开始并行模拟...\n")
-  results_list <- pblapply(1:n_simulations, function(i) {
-    run_one_simulation()
-  }, cl = cl)
+#   # 第四步：使用 pblapply 进行并行计算
+#   cat("开始并行模拟...\n")
+#   results_list <- pblapply(1:n_simulations, function(i) {
+#     run_one_simulation()
+#   }, cl = cl)
 
-  # 汇总结果
-  significant_counts <- Reduce("+", results_list)
-  names(significant_counts) <- paste0("p_value_", 1:n_p_values)
-
-  # 打印最终结果
-  cat("\n------ 模拟全部完成 ------\n")
-  cat("总模拟次数:", n_simulations, "\n")
-  cat("P值小于0.05的次数统计：\n")
-  print(significant_counts)
-}, error = function(e) {
-  # 如果任何步骤出错，打印错误信息
-  cat("\n并行计算过程中发生错误:\n")
-  print(e)
-}, finally = {
-  # 【重要】: 无论成功与否，最后都要停止集群，释放资源
-  stopCluster(cl)
-  cat("\n并行集群已关闭。\n")
-})
-
-significant_counts / n_simulations
-
-# %% 重构一下gls的代码
-
-data_set <- generate_mr_trio_data_ultra_updata(
-  n_independent = 2000, p_trio = 0.9, beta_fs_oe_exp = 0.9,
-  beta_ms_oe_exp = 0.9, beta_os_oe_exp = 0.9, beta_exp_to_out = 0
-)
-# 确保加载了必要的包
-suppressPackageStartupMessages({
-  library(dplyr)
-  library(nlme)
-})
-
-# 动态确定 n_snps
-# 假设 snps 列的命名模式是 "snps.1", "snps.2", ...
+#   # 汇总结果
+#   significant_counts <- Reduce("+", results_list)
+#   names(significant_counts) <- paste0("p_value_", 1:n_p_values)
 
 
-if (n_snps == 0) {
-  stop("未在 data_set[[1]] (data_independent_exp) 中找到 snps 列，无法确定 n_snps。")
-}
+#   cat("\n------ 模拟全部完成 ------\n")
+#   cat("总模拟次数:", n_simulations, "\n")
+#   cat("P值小于0.05的次数统计：\n")
+#   print(significant_counts)
+# }, error = function(e) {
+#   # 如果任何步骤出错，打印错误信息
+#   cat("\n并行计算过程中发生错误:\n")
+#   print(e)
+# }, finally = {
+#   # 【重要】: 无论成功与否，最后都要停止集群，释放资源
+#   stopCluster(cl)
+#   cat("\n并行集群已关闭。\n")
+# })
 
-beta_hat_exp <- matrix(0, nrow = n_snps, ncol = 2)
-beta_hat_out <- matrix(0, nrow = n_snps, ncol = 2)
-
-beta_sigma_exp <- matrix(0, nrow = 2 * n_snps, ncol = 2)
-beta_sigma_out <- matrix(0, nrow = 2 * n_snps, ncol = 2)
-p_values_exp <- matrix(0, nrow = n_snps, ncol = 2) # 新增：用于存储P值
-f_statistic_exp <- matrix(0, nrow = n_snps, ncol = 2) # 新增：用于存储F统计量
-
-for (i in 1:n_snps) {
-  snps_matrix_indicator <- (2 * i - 1):(2 * i)
-  snps_indicator <- paste0("snps.", i)
-  data_independent_exp_i <- data_set[[1]] %>%
-    dplyr::select(snps = ends_with(snps_indicator), expose = ends_with("expose")) %>%
-    dplyr::mutate(
-      family_id = 1:n(),
-      family_role = "independent"
-    )
-
-  data_trio_exp_i <- data_set[[2]] %>%
-    dplyr::select(ends_with(snps_indicator), ends_with("expose"))
-  names(data_trio_exp_i)[1] <- "father_snps"
-  names(data_trio_exp_i)[2] <- "mother_snps"
-  names(data_trio_exp_i)[3] <- "offspring_snps"
-  str(data_trio_exp_i)
-  # 求一下次等位基因频率
-  f <- (mean(data_independent_exp_i$snps) / 2 +
-    mean(c(data_trio_exp_i$offspring_snps, data_trio_exp_i$mother_snps)) / 2) / 2
-
-  # 进行填补
-  data_independent_exp_i <- data_independent_exp_i %>%
-    dplyr::mutate(g_snps = snps + 2 * f)
-
-  # 提取3个人并分开
-  data_trio_exp_i_father <- data_trio_exp_i %>% dplyr::select("father_snps", "father_expose")
-  data_trio_exp_i_father$family_id <-
-    (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) +
-      nrow(data_trio_exp_i_father))
-
-  data_trio_exp_i_mother <- data_trio_exp_i %>% dplyr::select("mother_snps", "mother_expose")
-
-  data_trio_exp_i_mother$family_id <-
-    (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) +
-      nrow(data_trio_exp_i_father))
-
-  data_trio_exp_i_offspring <- data_trio_exp_i %>% dplyr::select(
-    "offspring_snps",
-    "offspring_expose"
-  )
-
-  data_trio_exp_i_offspring$family_id <-
-    (nrow(data_independent_exp_i) + 1):(nrow(data_independent_exp_i) +
-      nrow(data_trio_exp_i_father))
-
-
-  # 给他们都变成长数据然后拼起来
-  names(data_trio_exp_i_father) <- c("snps", "expose", "family_id")
-  data_trio_exp_i_father$family_role <- "father"
-  names(data_trio_exp_i_mother) <- c("snps", "expose", "family_id")
-  data_trio_exp_i_mother$family_role <- "mother"
-  names(data_trio_exp_i_offspring) <- c("snps", "expose", "family_id")
-  data_trio_exp_i_offspring$family_role <- "offspring"
-  # 给这个几个长数据生成，协变量
-  data_trio_exp_i_offspring$g_snps <- data_trio_exp_i_mother$snps +
-    data_trio_exp_i_father$snps
-  data_trio_exp_i_father$g_snps <- data_trio_exp_i_father$snps + 2 * f
-  data_trio_exp_i_mother$g_snps <- data_trio_exp_i_mother$snps + 2 * f
-  # 合成起来
-  data_trio_exp_i_long <- bind_rows(
-    data_trio_exp_i_father,
-    data_trio_exp_i_mother, data_trio_exp_i_offspring
-  )
-  data_trio_exp_i_long <- arrange(data_trio_exp_i_long, family_id)
-  # 重命名然后合并两种数据
-  data_i_long <- bind_rows(
-    data_independent_exp_i %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "expose"),
-    data_trio_exp_i_long %>% dplyr::select("family_id", "family_role", "snps", "g_snps", "expose")
-  )
-  # 得到了这个长数据
-  data_i_long <- arrange(data_i_long, family_id)
-  data_gls <- perform_gls_analysis(data_i_long, include_intercept = TRUE)
-
-  beta_hat_exp[i, ] <- coef(data_gls$model)[c(2, 3)]
-  beta_sigma_exp[snps_matrix_indicator, ] <-
-    data_gls$information_matrix[2:3, 2:3]
-  if (!is.null(data_gls$model)) {
-    # 从模型摘要中提取P值
-    model_summary <- summary(data_gls$model)
-    p_values_exp[i, ] <- model_summary$tTable[c("snps", "g_snps"), "p-value"]
-
-    # 从ANOVA表中提取F统计量
-    model_anova <- anova(data_gls$model)
-    f_statistic_exp[i, ] <- model_anova[c("snps", "g_snps"), "F-value"]
-  }
-
-  # 对汇总数据的进行
-  data_independent_out_i <- data_set[[3]] %>%
-    dplyr::select(snps = ends_with(snps_indicator), outcome = ends_with("_outcome")) %>%
-    dplyr::mutate(
-      family_id = 1:n(),
-      family_role = "independent"
-    )
-  str(data_independent_out_i)
-  data_trio_out_i <- data_set[[4]] %>%
-    dplyr::select(ends_with(snps_indicator), ends_with("_outcome"))
-  names(data_trio_out_i)[1] <- "father_snps"
-  names(data_trio_out_i)[2] <- "mother_snps"
-  names(data_trio_out_i)[3] <- "offspring_snps"
-  str(data_trio_out_i)
-  # 求一下次等位基因频率
-  f_out <- (mean(data_independent_out_i$snps) / 2 +
-    mean(c(data_trio_out_i$offspring_snps, data_trio_out_i$mother_snps)) / 2) / 2
-
-  # 进行填补
-  data_independent_out_i <- data_independent_out_i %>%
-    dplyr::mutate(g_snps = snps + 2 * f_out)
-  str(data_independent_out_i)
-  # 提取3个人并分开
-  data_trio_out_i_father <- data_trio_out_i %>%
-    dplyr::select("father_snps", "father_outcome")
-  data_trio_out_i_father$family_id <-
-    (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) +
-      nrow(data_trio_out_i_father))
-  data_trio_out_i_mother <- data_trio_out_i %>%
-    dplyr::select("mother_snps", "mother_outcome")
-  data_trio_out_i_mother$family_id <-
-    (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) +
-      nrow(data_trio_out_i_father))
-  data_trio_out_i_offspring <- data_trio_out_i %>%
-    dplyr::select("offspring_snps", "offspring_outcome")
-  data_trio_out_i_offspring$family_id <-
-    (nrow(data_independent_out_i) + 1):(nrow(data_independent_out_i) +
-      nrow(data_trio_out_i_father))
-  str(data_trio_out_i_offspring)
-  # 给他们都变成长数据然后拼起来
-  names(data_trio_out_i_father) <- c("snps", "outcome", "family_id")
-  data_trio_out_i_father$family_role <- "father"
-  names(data_trio_out_i_mother) <- c("snps", "outcome", "family_id")
-  data_trio_out_i_mother$family_role <- "mother"
-  names(data_trio_out_i_offspring) <- c("snps", "outcome", "family_id")
-  data_trio_out_i_offspring$family_role <- "offspring"
-  # 给这个几个长数据生成，协变量
-  data_trio_out_i_offspring$g_snps <- data_trio_out_i_mother$snps +
-    data_trio_out_i_father$snps
-  data_trio_out_i_father$g_snps <- data_trio_out_i_father$snps + 2 * f_out
-  data_trio_out_i_mother$g_snps <- data_trio_out_i_mother$snps + 2 * f_out
-  # 合成起来
-  data_trio_out_i_long <- bind_rows(
-    data_trio_out_i_father, data_trio_out_i_mother,
-    data_trio_out_i_offspring
-  )
-  data_trio_out_i_long <- arrange(data_trio_out_i_long, desc(family_id))
-  # 重命名然后合并两种数据
-  data_i_long_out <- bind_rows(
-    data_independent_out_i %>% dplyr::select(
-      "family_id",
-      "family_role", "snps", "g_snps", "outcome"
-    ),
-    data_trio_out_i_long %>% dplyr::select(
-      "family_id",
-      "family_role", "snps", "g_snps", "outcome"
-    )
-  )
-  # 得到了这个长数据
-  data_i_long_out <- arrange(data_i_long_out, family_id)
-  data_i_long_out$family_id
-  data_gls_out <- perform_gls_analysis(data_i_long_out,
-    include_intercept = TRUE,
-    response_var_name = "outcome"
-  )
-
-  beta_hat_out[i, ] <- coef(data_gls_out$model)[c(2, 3)]
-  beta_sigma_out[snps_matrix_indicator, ] <-
-    data_gls_out$information_matrix[2:3, 2:3]
-}
+# significant_counts / n_simulations

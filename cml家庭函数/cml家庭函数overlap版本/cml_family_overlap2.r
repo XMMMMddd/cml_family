@@ -28,8 +28,8 @@ create_combined_diagonal_matrices <- function(
             if (!is.null(off_diagonal_elements)) {
                 current_off_diag_block_elements <- off_diagonal_elements[((i - 1) * 4 + 1):((i - 1) * 4 + 4)]
                 current_block_matrix[1, 3] <- current_off_diag_block_elements[1]
-                current_block_matrix[1, 4] <- current_off_diag_block_elements[2]
-                current_block_matrix[2, 3] <- current_off_diag_block_elements[3]
+                current_block_matrix[1, 4] <- current_off_diag_block_elements[3]
+                current_block_matrix[2, 3] <- current_off_diag_block_elements[2]
                 current_block_matrix[2, 4] <- current_off_diag_block_elements[4]
                 current_block_matrix[3, 1] <- current_block_matrix[1, 3]
                 current_block_matrix[4, 1] <- current_block_matrix[1, 4]
@@ -648,7 +648,7 @@ robust_cml_fit <- function(
 }
 
 # %% cml本体
-cml_family_overlap_2 <- function(
+cml_family_overlap_2_init <- function(
     n_snps, beta_hat_exp, beta_hat_out,
     matrix_big,
     max_iter = 100, tol = 1e-6, n_starts = 5,
@@ -684,7 +684,7 @@ cml_family_overlap_2 <- function(
             n_snps, beta_hat_exp, beta_hat_out,
             matrix_big, a_legal_i, b_legal_i,
             max_iter = max_iter, tol = tol, n_starts = n_starts,
-            alpha_start_range =  alpha_start_range,
+            alpha_start_range = alpha_start_range,
             digits = digits
         )
         legal_pairs_table$alpha[i] <- cml_fit_i$alpha_new
@@ -744,5 +744,140 @@ cml_family_overlap_2 <- function(
             legal_pairs_table = legal_pairs_table
         )
         return(result)
+    }
+}
+# %% cml鲁棒性增强
+cml_family_overlap_2_robust <- function(
+    n_snps, beta_hat_exp, beta_hat_out,
+    matrix_big,
+    max_iter = 100, tol = 1e-6, n_starts = 5,
+    alpha_start_range = c(-0.01, 0.01),
+    digits = 4) {
+    # --- 1. 组合生成部分 (您的代码已经很高效) ---
+    if (n_snps > 1) {
+        legal_pairs_list <- lapply(2:n_snps, function(a) {
+            # 修正：b_legal 应该小于 a_legal，所以是 1:(a-1)
+            # 如果 b_legal 可以等于 a_legal，那么您的 1:a 是正确的
+            # 这里我假设 b 必须严格小于 a，如果不是，请改回 1:a
+            if (a > 1) {
+                return(data.frame(a_legal = a, b_legal = 1:(a - 1)))
+            }
+        })
+        legal_pairs_table <- do.call(rbind, legal_pairs_list)
+
+        cat("\n--- a_legal 和 b_legal 组合表格 ---\n")
+        print(head(legal_pairs_table))
+        cat("...\n")
+        cat("总共生成了", nrow(legal_pairs_table), "个待计算的组合。\n\n")
+    } else {
+        cat("\n'n_snps' 的值 (", n_snps, ") 小于等于 1，无法生成任何 b_legal < a_legal 的组合。\n")
+        # 直接返回一个空结果，而不是继续执行
+        return(list(
+            weighted_alpha = NA,
+            weighted_se = NA,
+            legal_pairs_table = data.frame(a_legal = integer(0), b_legal = integer(0))
+        ))
+    }
+
+    # --- 2. 结果预分配 ---
+    # 预先分配列表来存储结果，这比在循环中反复扩展数据框更高效
+    results_list <- vector("list", nrow(legal_pairs_table))
+
+    # --- 3. 核心计算循环 (增加 tryCatch 和日志) ---
+    for (i in 1:nrow(legal_pairs_table)) {
+        a_legal_i <- legal_pairs_table$a_legal[i]
+        b_legal_i <- legal_pairs_table$b_legal[i]
+
+        # 增加进度条反馈
+        cat(sprintf("正在处理第 %d / %d 个组合: a=%d, b=%d\n", i, nrow(legal_pairs_table), a_legal_i, b_legal_i))
+
+        # 【核心改动】使用 tryCatch 包裹所有可能出错的计算
+        results_list[[i]] <- tryCatch(
+            {
+                # --- 尝试执行的代码块 ---
+                cml_fit_i <- robust_cml_fit(
+                    n_snps, beta_hat_exp, beta_hat_out,
+                    matrix_big, a_legal_i, b_legal_i,
+                    max_iter = max_iter, tol = tol, n_starts = n_starts,
+                    alpha_start_range = alpha_start_range,
+                    digits = digits
+                )
+
+                complete_set_i <- cml_fit_i$complete_set
+                a_reduce_b_set <- cml_fit_i$a_reduce_b_set
+                beta_exp_i <- cml_fit_i$beta_exp_updated
+                alpha_i <- cml_fit_i$alpha_new
+
+                alpha_se_i <- calculate_alpha_se_rcpp(
+                    complete_set_i, a_reduce_b_set, matrix_big,
+                    beta_hat_exp, beta_hat_out, beta_exp_i, alpha_i
+                )
+
+                bic_i <- calculate_bic(
+                    cml_fit_i, beta_hat_exp, beta_hat_out, matrix_big,
+                    min_n = 1000, a = n_snps - a_legal_i, b = n_snps - b_legal_i
+                )
+
+                # 如果成功，返回一个包含所有结果的列表
+                list(alpha = alpha_i, alpha_se = alpha_se_i, bic = bic_i)
+            },
+            error = function(e) {
+                # --- 如果发生任何错误，则执行此处的代码 ---
+                cat(sprintf("  -> 组合 (a=%d, b=%d) 计算失败。错误信息: %s\n", a_legal_i, b_legal_i, e$message))
+                # 返回包含 NA 的列表，以标记失败
+                return(list(alpha = NA, alpha_se = NA, bic = NA))
+            }
+        )
+    }
+
+    # --- 4. 整合循环结果 ---
+    # 将列表中的结果高效地合并回数据框
+    results_df <- do.call(rbind, lapply(results_list, as.data.frame))
+    legal_pairs_table <- cbind(legal_pairs_table, results_df)
+
+    # --- 5. 模型平均 (增加 is.finite 检查) ---
+    cat("\n--- 所有组合计算完成，开始进行模型平均 ---\n")
+
+    # 【核心改动】使用 is.finite() 来过滤掉 NA, NaN, Inf, -Inf
+    valid_rows_filter <- is.finite(legal_pairs_table$alpha) &
+        is.finite(legal_pairs_table$alpha_se) &
+        is.finite(legal_pairs_table$bic)
+
+    valid_table <- legal_pairs_table[valid_rows_filter, ]
+    cat("在", nrow(legal_pairs_table), "个组合中，有", nrow(valid_table), "个得到了有效的数值结果。\n")
+
+    if (nrow(valid_table) > 0) {
+        # 计算权重时也要注意BIC可能为Inf或-Inf的情况
+        # 通过在有效数据子集上计算来避免此问题
+        weights <- exp(-(valid_table$bic / 2))
+
+        # 再次检查权重是否有效
+        if (any(!is.finite(weights)) || sum(weights, na.rm = TRUE) == 0) {
+            warning("计算出的权重包含无效值(Inf/NaN)或总和为零，无法进行加权平均。")
+            return(list(weighted_alpha = NA, weighted_se = NA, legal_pairs_table = legal_pairs_table))
+        }
+
+        normalized_weights <- weights / sum(weights)
+        valid_table$weight <- normalized_weights
+
+        weighted_alpha <- sum(valid_table$weight * valid_table$alpha)
+
+        # 计算加权SE的公式保持不变
+        weighted_se <- sum(valid_table$weight * sqrt((valid_table$alpha_se)^2 +
+            (valid_table$alpha - weighted_alpha)^2))
+
+        result <- list(
+            weighted_alpha = weighted_alpha,
+            weighted_se = weighted_se,
+            legal_pairs_table = legal_pairs_table # 返回包含所有尝试（包括失败）的完整表格
+        )
+        return(result)
+    } else {
+        warning("没有任何组合能够成功计算出有效结果。")
+        return(list(
+            weighted_alpha = NA,
+            weighted_se = NA,
+            legal_pairs_table = legal_pairs_table
+        ))
     }
 }

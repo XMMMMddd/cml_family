@@ -1797,6 +1797,346 @@ generate_mr_trio_data_ultra_updata <- function(
   return(results)
 }
 
+# %% overlap样本生成函数
+
+
+#' @title 生成模拟的三代家系遗传数据（最终版）
+#' @description 生成包含复杂遗传效应、混杂、选型婚配及多种SNP类型的数据，
+#'              用于孟德尔随机化方法学的研究和评估。
+#'
+#' @param n_snps 整数型。与暴露相关的SNP数量 (合规IV + 多效性SNP)。
+#' @param n_pleiotropy 整数型。在 n_snps 中具有多效性的SNP数量。
+#' @param n_null_snps 整数型。与暴露和结局都无关的SNP数量。
+#' @param n_independent 整数型。独立个体的数量。
+#' @param p_trio 数值型。三联体样本的比例。
+#' @param p_exp_out 数值型。暴露组和结局组之间的名义重叠比例。
+#' @param p_f 数值型。父系来源的等位基因频率。
+#' @param p_m 数值型。母系来源的等位基因频率。
+#' @param beta_os_oe_exp 数值型。子代自身SNP对暴露的总效应。
+#' @param beta_fs_oe_exp 数值型。父亲SNP对子代暴露的总效应。
+#' @param beta_ms_oe_exp 数值型。母亲SNP对子代暴露的总效应。
+#' @param beta_os_oe_out 数值型。子代自身SNP对结局的总直接多效性效应。
+#' @param beta_fs_oe_out 数值型。父亲SNP对子代结局的总直接多效性效应。
+#' @param beta_ms_oe_out 数值型。母亲SNP对子代结局的总直接多效性效应。
+#' @param p_negative_pleiotropy 数值型。多效性SNP中负向效应的比例。
+#' @param beta_exp_to_out 数值型。暴露对结局的真实因果效应。
+#' @param var_confounding_exp 数值型。影响暴露的混杂因素的方差。
+#' @param var_confounding_out 数值型。影响结局的混杂因素的方差。
+#' @param r_correlation 数值型。共享环境因素的方差。
+#' @param n_seed 整数型。随机数种子。
+#' @param assortative_mating_strength 数值型。选型婚配强度参数。
+#'
+#' @return 一个列表，包含五个元素：
+#'         \describe{
+#'           \item{data_independent_exp}{暴露组的独立个体数据}
+#'           \item{data_trio_exp}{暴露组的三联体家庭数据}
+#'           \item{data_independent_out}{结局组的独立个体数据}
+#'           \item{data_trio_out}{结局组的三联体家庭数据}
+#'           \item{snp_info}{一个数据框，标记了每个SNP的ID和类型}
+#'         }
+#' @examples
+#' # 生成包含3个相关SNP, 1个多效性SNP, 10个无关SNP的数据
+#' simulated_data <- generate_mr_trio_data_final(n_snps = 3, n_pleiotropy = 1, n_null_snps = 10)
+#' # 查看SNP信息
+#' print(simulated_data$snp_info)
+#' # 查看暴露组的独立个体数据 (现在应包含 3+10=13 个SNP列)
+#' head(simulated_data$data_independent_exp)
+#'
+generate_mr_trio_data_ultra_overlap <- function(
+    n_snps = 3, n_pleiotropy = 1, n_null_snps = 10,
+    n_independent = 1000, p_trio = 0.5,
+    p_exp_out = 0.5, p_overlap = 0,
+    p_f = 0.3, p_m = 0.3,
+    beta_fs_oe_exp = 0.3, beta_ms_oe_exp = 0,
+    beta_os_oe_exp = 0,
+    beta_fs_oe_out = 0, beta_ms_oe_out = 0,
+    beta_os_oe_out = 0, p_negative_pleiotropy = 0,
+    beta_exp_to_out = 0.4,
+    var_confounding_exp = 0.2, var_confounding_out = 0.2,
+    r_correlation = 0.2, n_seed = NULL,
+    assortative_mating_strength = 1000) {
+  # --- 0. 设置随机种子 ---
+  set.seed(n_seed)
+
+  #  计算总SNP数量
+  n_total_snps <- n_snps + n_null_snps
+
+  # --- 1. 初始化效应系数和多效性模式 ---
+  #   1.1 计算每个相关SNP的平均效应值
+  beta_os_oe_exp_snp <- if (n_snps > 0) beta_os_oe_exp / n_snps else 0
+  beta_fs_oe_exp_snp <- if (n_snps > 0) beta_fs_oe_exp / n_snps else 0
+  beta_ms_oe_exp_snp <- if (n_snps > 0) beta_ms_oe_exp / n_snps else 0
+  beta_os_oe_out_snp <- if (n_snps > 0) beta_os_oe_out / n_snps else 0
+  beta_fs_oe_out_snp <- if (n_snps > 0) beta_fs_oe_out / n_snps else 0
+  beta_ms_oe_out_snp <- if (n_snps > 0) beta_ms_oe_out / n_snps else 0
+
+  #   1.2 定义多效性效应的修正因子 (仅针对前 n_snps 个SNP)
+  pleio_modifier <- numeric(n_snps)
+  pleiotropic_snp_indices <- integer(0)
+  if (n_pleiotropy > 0 && n_pleiotropy <= n_snps) {
+    pleiotropic_snp_indices <- sample(1:n_snps, n_pleiotropy, replace = FALSE)
+    pleiotropic_effects_direction <- sample(c(-1, 1), n_pleiotropy,
+      prob = c(p_negative_pleiotropy, 1 - p_negative_pleiotropy),
+      replace = TRUE
+    )
+    pleio_modifier[pleiotropic_snp_indices] <- pleiotropic_effects_direction
+  }
+
+  #   1.3 构建包含所有SNP (n_total_snps) 的遗传效应矩阵
+  matrix_beta_os_oe_exp <- matrix(c(rep(beta_os_oe_exp_snp, n_snps), rep(0, n_null_snps)), ncol = 1)
+  matrix_beta_fs_oe_exp <- matrix(c(rep(beta_fs_oe_exp_snp, n_snps), rep(0, n_null_snps)), ncol = 1)
+  matrix_beta_ms_oe_exp <- matrix(c(rep(beta_ms_oe_exp_snp, n_snps), rep(0, n_null_snps)), ncol = 1)
+  matrix_beta_os_oe_out <- matrix(c(rep(beta_os_oe_out_snp, n_snps) * pleio_modifier, rep(0, n_null_snps)), ncol = 1)
+  matrix_beta_fs_oe_out <- matrix(c(rep(beta_fs_oe_out_snp, n_snps) * pleio_modifier, rep(0, n_null_snps)), ncol = 1)
+  matrix_beta_ms_oe_out <- matrix(c(rep(beta_ms_oe_out_snp, n_snps) * pleio_modifier, rep(0, n_null_snps)), ncol = 1)
+
+  #   1.4 创建SNP信息注释表
+  snp_info <- data.frame(snp_id = 1:n_total_snps, type = "Valid IV")
+  if (n_pleiotropy > 0) {
+    snp_info$type[pleiotropic_snp_indices] <- "Pleiotropic"
+  }
+  if (n_null_snps > 0) {
+    snp_info$type[(n_snps + 1):n_total_snps] <- "Unrelated"
+  }
+  snp_info$type <- factor(snp_info$type, levels = c("Valid IV", "Pleiotropic", "Unrelated"))
+
+  # --- 2. 定义核心辅助函数 ---
+  internal_get_transmitted_allele <- function(parent_snps) {
+    sapply(parent_snps, function(genotype) {
+      if (genotype == 0) {
+        return(0)
+      }
+      if (genotype == 2) {
+        return(1)
+      }
+      if (genotype == 1) {
+        return(rbinom(1, 1, 0.5))
+      }
+      return(NA)
+    })
+  }
+
+  if (!exists("generate_snp_hwe")) {
+    generate_snp_hwe <- function(n_samples, maf) {
+      rbinom(n_samples, 2, maf)
+    }
+  }
+
+  internal_generate_population_snps <- function(n_individuals, num_snps, allele_freq) {
+    matrix(sapply(1:num_snps, function(j) generate_snp_hwe(n_individuals, allele_freq)), nrow = n_individuals)
+  }
+
+  generate_expose_function <- function(beta_own_snp_effect, beta_father_snp_effect,
+                                       beta_mother_snp_effect, snps_own, snps_father, snps_mother,
+                                       confounder_values, correlation_factor_values,
+                                       num_individuals) {
+    genetic_component <- snps_own %*% beta_own_snp_effect +
+      snps_father %*% beta_father_snp_effect +
+      snps_mother %*% beta_mother_snp_effect
+    deterministic_part <- genetic_component + confounder_values + correlation_factor_values
+    var_deterministic <- var(deterministic_part, na.rm = TRUE)
+    sd_error <- sqrt(max(0, 1 - var_deterministic))
+    return(deterministic_part + rnorm(num_individuals, mean = 0, sd = sd_error))
+  }
+
+  generate_outcome_function <- function(causal_effect_exp_to_out, beta_own_snp_pleio,
+                                        beta_father_snp_pleio, beta_mother_snp_pleio,
+                                        exposure_values, snps_own, snps_father, snps_mother,
+                                        confounder_values, correlation_factor_values,
+                                        num_individuals) {
+    genetic_pleiotropy_component <- snps_own %*% beta_own_snp_pleio +
+      snps_father %*% beta_father_snp_pleio +
+      snps_mother %*% beta_mother_snp_pleio
+    deterministic_part <- causal_effect_exp_to_out * exposure_values +
+      genetic_pleiotropy_component +
+      confounder_values + correlation_factor_values
+    var_deterministic <- var(deterministic_part, na.rm = TRUE)
+    sd_error <- sqrt(max(0, 1 - var_deterministic))
+    return(deterministic_part + rnorm(num_individuals, mean = 0, sd = sd_error))
+  }
+
+  assortative_mating_function <- function(snps_p1, expose_p1, outcome_p1,
+                                          snps_p2, expose_p2, outcome_p2,
+                                          mating_strength, num_individuals) {
+    data_p1 <- data.frame(snps = snps_p1, expose = expose_p1, outcome = outcome_p1)
+    data_p2 <- data.frame(snps = snps_p2, expose = expose_p2, outcome = outcome_p2)
+
+    data_p1 <- data_p1 %>%
+      dplyr::mutate(mating_pheno_star = expose + rnorm(num_individuals, 0, sqrt(mating_strength))) %>%
+      dplyr::arrange(mating_pheno_star)
+
+    data_p2 <- data_p2 %>%
+      dplyr::mutate(mating_pheno_star = outcome + rnorm(num_individuals, 0, sqrt(mating_strength))) %>%
+      dplyr::arrange(mating_pheno_star)
+
+    return(list(data_p1, data_p2))
+  }
+
+  # --- 3. 生成混杂因素和共享环境因素 ---
+  values_confounder_exp <- rnorm(n_independent, 0, sqrt(var_confounding_exp))
+  values_confounder_out <- rnorm(n_independent, 0, sqrt(var_confounding_out))
+  values_correlation_factor_exp <- rnorm(n_independent, 0, sqrt(r_correlation))
+  values_correlation_factor_out <- rnorm(n_independent, 0, sqrt(r_correlation))
+
+  # --- 4. 祖父母代 (G0) 数据生成 ---
+  grandfather_father_snps <- internal_generate_population_snps(n_independent, n_total_snps, p_f)
+  grandmother_father_snps <- internal_generate_population_snps(n_independent, n_total_snps, p_f)
+  grandfather_mother_snps <- internal_generate_population_snps(n_independent, n_total_snps, p_f)
+  grandmother_mother_snps <- internal_generate_population_snps(n_independent, n_total_snps, p_f)
+
+  zero_snps_effect_matrix <- matrix(0, nrow = n_total_snps, ncol = 1)
+
+  grandfather_father_expose <- generate_expose_function(matrix_beta_os_oe_exp, zero_snps_effect_matrix, zero_snps_effect_matrix, grandfather_father_snps, grandfather_father_snps, grandfather_father_snps, values_confounder_exp, values_correlation_factor_exp, n_independent)
+  grandmother_father_expose <- generate_expose_function(matrix_beta_os_oe_exp, zero_snps_effect_matrix, zero_snps_effect_matrix, grandmother_father_snps, grandmother_father_snps, grandmother_father_snps, values_confounder_exp, values_correlation_factor_exp, n_independent)
+  grandfather_mother_expose <- generate_expose_function(matrix_beta_os_oe_exp, zero_snps_effect_matrix, zero_snps_effect_matrix, grandfather_mother_snps, grandfather_mother_snps, grandfather_mother_snps, values_confounder_exp, values_correlation_factor_exp, n_independent)
+  grandmother_mother_expose <- generate_expose_function(matrix_beta_os_oe_exp, zero_snps_effect_matrix, zero_snps_effect_matrix, grandmother_mother_snps, grandmother_mother_snps, grandmother_mother_snps, values_confounder_exp, values_correlation_factor_exp, n_independent)
+
+  grandfather_father_outcome <- generate_outcome_function(beta_exp_to_out, matrix_beta_os_oe_out, zero_snps_effect_matrix, zero_snps_effect_matrix, grandfather_father_expose, grandfather_father_snps, grandfather_father_snps, grandfather_father_snps, values_confounder_out, values_correlation_factor_out, n_independent)
+  grandmother_father_outcome <- generate_outcome_function(beta_exp_to_out, matrix_beta_os_oe_out, zero_snps_effect_matrix, zero_snps_effect_matrix, grandmother_father_expose, grandmother_father_snps, grandmother_father_snps, grandmother_father_snps, values_confounder_out, values_correlation_factor_out, n_independent)
+  grandfather_mother_outcome <- generate_outcome_function(beta_exp_to_out, matrix_beta_os_oe_out, zero_snps_effect_matrix, zero_snps_effect_matrix, grandfather_mother_expose, grandfather_mother_snps, grandfather_mother_snps, grandfather_mother_snps, values_confounder_out, values_correlation_factor_out, n_independent)
+  grandmother_mother_outcome <- generate_outcome_function(beta_exp_to_out, matrix_beta_os_oe_out, zero_snps_effect_matrix, zero_snps_effect_matrix, grandmother_mother_expose, grandmother_mother_snps, grandmother_mother_snps, grandmother_mother_snps, values_confounder_out, values_correlation_factor_out, n_independent)
+
+  # --- 5. 祖父母代选型婚配 ---
+  grand_father_line_am_results <- assortative_mating_function(grandfather_father_snps, grandfather_father_expose, grandfather_father_outcome, grandmother_father_snps, grandmother_father_expose, grandmother_father_outcome, assortative_mating_strength, n_independent)
+  temp_gff_data <- grand_father_line_am_results[[1]]
+  grandfather_father_snps <- as.matrix(temp_gff_data[, grepl("snps.", names(temp_gff_data))])
+  grandfather_father_expose <- temp_gff_data$expose
+  grandfather_father_outcome <- temp_gff_data$outcome
+  temp_gmf_data <- grand_father_line_am_results[[2]]
+  grandmother_father_snps <- as.matrix(temp_gmf_data[, grepl("snps.", names(temp_gmf_data))])
+  grandmother_father_expose <- temp_gmf_data$expose
+  grandmother_father_outcome <- temp_gmf_data$outcome
+
+  grand_mother_line_am_results <- assortative_mating_function(grandfather_mother_snps, grandfather_mother_expose, grandfather_mother_outcome, grandmother_mother_snps, grandmother_mother_expose, grandmother_mother_outcome, assortative_mating_strength, n_independent)
+  temp_gfm_data <- grand_mother_line_am_results[[1]]
+  grandfather_mother_snps <- as.matrix(temp_gfm_data[, grepl("snps.", names(temp_gfm_data))])
+  grandfather_mother_expose <- temp_gfm_data$expose
+  grandfather_mother_outcome <- temp_gfm_data$outcome
+  temp_gmm_data <- grand_mother_line_am_results[[2]]
+  grandmother_mother_snps <- as.matrix(temp_gmm_data[, grepl("snps.", names(temp_gmm_data))])
+  grandmother_mother_expose <- temp_gmm_data$expose
+  grandmother_mother_outcome <- temp_gmm_data$outcome
+
+  # --- 6. 父母代 (G1) 数据生成 ---
+  father_snps <- matrix(sapply(1:n_total_snps, function(i) internal_get_transmitted_allele(grandfather_father_snps[, i]) + internal_get_transmitted_allele(grandmother_father_snps[, i])), nrow = n_independent)
+  mother_snps <- matrix(sapply(1:n_total_snps, function(i) internal_get_transmitted_allele(grandfather_mother_snps[, i]) + internal_get_transmitted_allele(grandmother_mother_snps[, i])), nrow = n_independent)
+
+  father_expose <- generate_expose_function(matrix_beta_os_oe_exp, matrix_beta_fs_oe_exp, matrix_beta_ms_oe_exp, father_snps, grandfather_father_snps, grandmother_father_snps, values_confounder_exp, values_correlation_factor_exp, n_independent)
+  mother_expose <- generate_expose_function(matrix_beta_os_oe_exp, matrix_beta_fs_oe_exp, matrix_beta_ms_oe_exp, mother_snps, grandfather_mother_snps, grandmother_mother_snps, values_confounder_exp, values_correlation_factor_exp, n_independent)
+  father_outcome <- generate_outcome_function(beta_exp_to_out, matrix_beta_os_oe_out, matrix_beta_fs_oe_out, matrix_beta_ms_oe_out, father_expose, father_snps, grandfather_father_snps, grandmother_father_snps, values_confounder_out, values_correlation_factor_out, n_independent)
+  mother_outcome <- generate_outcome_function(beta_exp_to_out, matrix_beta_os_oe_out, matrix_beta_fs_oe_out, matrix_beta_ms_oe_out, mother_expose, mother_snps, grandfather_mother_snps, grandmother_mother_snps, values_confounder_out, values_correlation_factor_out, n_independent)
+
+  # --- 7. 父母代选型婚配 ---
+  parent_generation_am_results <- assortative_mating_function(father_snps, father_expose, father_outcome, mother_snps, mother_expose, mother_outcome, assortative_mating_strength, n_independent)
+  temp_father_data <- parent_generation_am_results[[1]]
+  father_snps <- as.matrix(temp_father_data[, grepl("snps.", names(temp_father_data))])
+  father_expose <- temp_father_data$expose
+  father_outcome <- temp_father_data$outcome
+  temp_mother_data <- parent_generation_am_results[[2]]
+  mother_snps <- as.matrix(temp_mother_data[, grepl("snps.", names(temp_mother_data))])
+  mother_expose <- temp_mother_data$expose
+  mother_outcome <- temp_mother_data$outcome
+
+  # --- 8. 子代 (G2) 数据生成 ---
+  offspring_snps <- matrix(sapply(1:n_total_snps, function(i) internal_get_transmitted_allele(father_snps[, i]) + internal_get_transmitted_allele(mother_snps[, i])), nrow = n_independent)
+  offspring_expose <- generate_expose_function(matrix_beta_os_oe_exp, matrix_beta_fs_oe_exp, matrix_beta_ms_oe_exp, offspring_snps, father_snps, mother_snps, values_confounder_exp, values_correlation_factor_exp, n_independent)
+  offspring_outcome <- generate_outcome_function(beta_exp_to_out, matrix_beta_os_oe_out, matrix_beta_fs_oe_out, matrix_beta_ms_oe_out, offspring_expose, offspring_snps, father_snps, mother_snps, values_confounder_out, values_correlation_factor_out, n_independent)
+
+  # --- 9. 构建完整数据集 ---
+  colnames(father_snps) <- paste0("father_snps.", 1:n_total_snps)
+  colnames(mother_snps) <- paste0("mother_snps.", 1:n_total_snps)
+  colnames(offspring_snps) <- paste0("offspring_snps.", 1:n_total_snps)
+
+  data_all <- data.frame(id = 1:n_independent, father_snps, father_expose, father_outcome, mother_snps, mother_expose, mother_outcome, offspring_snps, offspring_expose, offspring_outcome)
+
+  # --- 10. 样本选择与划分 ---
+  n_exp_total <- floor(n_independent * p_exp_out)
+  n_out_total <- n_independent - n_exp_total
+  n_overlap_actual <- min(
+    floor(n_independent * p_overlap), n_exp_total, n_out_total
+  )
+  n_exp_only <- n_exp_total - n_overlap_actual
+  n_out_only <- n_out_total - n_overlap_actual
+
+  all_available_indices <- 1:n_independent
+  indices_overlap <- sample(all_available_indices,
+    size = n_overlap_actual, replace = FALSE
+  )
+  remaining_indices <- setdiff(all_available_indices, indices_overlap)
+  indices_exp_only <- sample(remaining_indices,
+    size = n_exp_only, replace = FALSE
+  )
+  remaining_indices <- setdiff(
+    remaining_indices,
+    indices_exp_only
+  )
+  indices_out_only <- sample(remaining_indices,
+    size = n_out_only, replace = FALSE
+  )
+
+  indices_exp_final <- c(indices_overlap, indices_exp_only)
+  indices_out_final <- c(indices_overlap, indices_out_only)
+
+
+  exposure_data_full <- data_all %>%
+    dplyr::filter(id %in% indices_exp_final) %>%
+    dplyr::select(
+      id, dplyr::starts_with("father_snps."),
+      dplyr::starts_with("mother_snps."),
+      dplyr::starts_with("offspring_snps."),
+      father_expose, mother_expose, offspring_expose
+    )
+  outcome_data_full <- data_all %>%
+    dplyr::filter(id %in% indices_out_final) %>%
+    dplyr::select(
+      id, dplyr::starts_with("father_snps."),
+      dplyr::starts_with("mother_snps."), dplyr::starts_with("offspring_snps."),
+      father_outcome, mother_outcome,
+      offspring_outcome, father_expose,
+      mother_expose, offspring_expose
+    )
+  n_trio_exp <- floor(nrow(exposure_data_full) * p_trio)
+  n_independent_exp <- nrow(exposure_data_full) - n_trio_exp
+  data_independent_exp <-
+    exposure_data_full[
+      1:n_independent_exp, ,
+      drop = FALSE
+    ] %>% dplyr::select(dplyr::starts_with("offspring_snps."), offspring_expose)
+  data_trio_exp <-
+    exposure_data_full[
+      (n_independent_exp + 1):nrow(exposure_data_full), ,
+      drop = FALSE
+    ] %>%
+    dplyr::select(
+      dplyr::starts_with("father_snps."),
+      dplyr::starts_with("mother_snps."),
+      dplyr::starts_with("offspring_snps."),
+      father_expose, mother_expose, offspring_expose
+    )
+
+  n_trio_out <- floor(nrow(outcome_data_full) * p_trio)
+  n_independent_out <- nrow(outcome_data_full) - n_trio_out
+
+  data_independent_out <- outcome_data_full[1:n_independent_out, , drop = FALSE] %>% dplyr::select(dplyr::starts_with("offspring_snps."), offspring_outcome)
+  data_trio_out <- outcome_data_full[(n_independent_out + 1):nrow(outcome_data_full), , drop = FALSE] %>% dplyr::select(dplyr::starts_with("father_snps."), dplyr::starts_with("mother_snps."), dplyr::starts_with("offspring_snps."), father_outcome, mother_outcome, offspring_outcome, father_expose, mother_expose, offspring_expose)
+
+  # --- 11. 返回结果 ---
+  results <- list(
+    data_independent_exp = data_independent_exp,
+    data_trio_exp = data_trio_exp,
+    data_independent_out = data_independent_out,
+    data_trio_out = data_trio_out,
+    snp_info = snp_info
+  )
+
+  return(results)
+}
+a <- generate_mr_trio_data_ultra_overlap(
+  n_snps = 3, n_pleiotropy = 1, n_null_snps = 10,
+  n_independent = 1000, p_trio = 0.5,
+  p_exp_out = 0.5, p_overlap = 1
+)
+a$data_trio_out$mother_snps.1 == a$data_trio_exp$mother_snps.1
 # %% 生成的数据合法么
 a <- generate_mr_trio_data_ultra_updata(
   n_snps = 3, n_pleiotropy = 0,

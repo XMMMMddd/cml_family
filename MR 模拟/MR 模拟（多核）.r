@@ -29,40 +29,38 @@ simulation_cmlfamily_multsnps_cpp <- function(
         fun = function(sim_index, sim_params_list) {
             # 第一个参数 sim_index 接收迭代序号，但后面不用它
             # 调用内部模拟函数
-            triplet_family_simulation_once_robust_mr(
+            triplet_family_simulation_once_overlap(
                 # --- 从列表解包参数 ---
-                n = sim_params_list$n,
-                num_pleiotropic = sim_params_list$num_pleiotropic,
-                N_out = sim_params_list$N_out,
-                # 样本重叠
-                overlap_prop = sim_params_list$overlap_prop,
-                # 直接效应
-                beta_FStoOE_exp = sim_params_list$beta_FStoOE_exp,
-                beta_MStoOE_exp = sim_params_list$beta_MStoOE_exp,
-                beta_OStoOE_exp = sim_params_list$beta_OStoOE_exp,
-                # 水平多效性
-                prop_negative_pleiotropy =
-                    sim_params_list$prop_negative_pleiotropy, # 不满足inside假设
-                mean_beta_FStoOE_out = sim_params_list$mean_beta_FStoOE_out,
-                sd_beta_FStoOE_out = sim_params_list$sd_beta_FStoOE_out,
-                mean_beta_MStoOE_out = sim_params_list$mean_beta_MStoOE_out,
-                sd_beta_MStoOE_out = sim_params_list$sd_beta_MStoOE_out,
-                mean_beta_OStoOE_out = sim_params_list$mean_beta_OStoOE_out,
-                sd_beta_OStoOE_out = sim_params_list$sd_beta_OStoOE_out,
-                # 选型婚配
-                assortative_mating_prob =
-                    sim_params_list$assortative_mating_prob, # 选型婚配比例
-                assortative_mating_strength =
-                    sim_params_list$assortative_mating_strength, # 选型婚配强度
-                # 人群分层（双人群差异）
-                crowd_stratification_differences =
-                    sim_params_list$crowd_stratification_differences,
-                # 其他参数设置
+                n_snps = sim_params_list$n_snps,
+                n_pleiotropy = sim_params_list$n_pleiotropy,
+                n_null_snps = sim_params_list$n_null_snps,
+                n_independent = sim_params_list$n_independent,
+                p_trio = sim_params_list$p_trio,
+                p_exp_out = sim_params_list$p_exp_out,
+                p_overlap = sim_params_list$p_overlap,
+                p_f = sim_params_list$p_f,
+                p_m = sim_params_list$p_m, # p_m 当前未在SNP生成中使用
+                # 暴露效应
+                beta_fs_oe_exp = sim_params_list$beta_fs_oe_exp,
+                beta_ms_oe_exp = sim_params_list$beta_ms_oe_exp,
+                beta_os_oe_exp = sim_params_list$beta_os_oe_exp,
+                # 结局效应 (直接多效性 / 遗传叠加效应)
+                beta_fs_oe_out = sim_params_list$beta_fs_oe_out,
+                beta_ms_oe_out = sim_params_list$beta_ms_oe_out,
+                beta_os_oe_out = sim_params_list$beta_os_oe_out,
+                p_negative_pleiotropy =
+                    sim_params_list$p_negative_pleiotropy,
+                # 因果效应
                 beta_exp_to_out = sim_params_list$beta_exp_to_out,
-                beta_confounding_exp = sim_params_list$beta_confounding_exp,
-                beta_confounding_out = sim_params_list$beta_confounding_out,
-                correlation = sim_params_list$correlation,
-                seed = NULL
+                # 混杂效应
+                var_confounding_exp = sim_params_list$var_confounding_exp,
+                var_confounding_out = sim_params_list$var_confounding_out,
+                # 其他参数
+                r_correlation = sim_params_list$r_correlation,
+                n_seed = sim_params_list$n_seed,
+                # 选型婚配强度(跨性状)
+                assortative_mating_strength =
+                    sim_params_list$assortative_mating_strength
             )
         },
         # --- 将 'param' 列表传递给匿名函数的 'sim_params_list' 参数 ---
@@ -136,41 +134,32 @@ simulation_ListtoTibble <- function(simulation_output_list) {
 
 # %% 小型模拟
 sim_params_list <- list( # --- 从列表解包参数 ---
-    n = 10, num_pleiotropic = 0, N_out = 1000,
-    # 样本重叠
-    overlap_prop = 0,
-    # 直接效应
-    beta_FStoOE_exp = 0.3,
-    beta_MStoOE_exp = 0.3,
-    beta_OStoOE_exp = 0.3,
-    # 水平多效性
-    prop_negative_pleiotropy =
-        0, # 不满足inside假设
-    mean_beta_FStoOE_out = 0,
-    sd_beta_FStoOE_out = 0.05,
-    mean_beta_MStoOE_out = 0,
-    sd_beta_MStoOE_out = 0.05,
-    mean_beta_OStoOE_out = 0,
-    sd_beta_OStoOE_out = 0.05,
-    # 选型婚配
-    assortative_mating_prob = 0.999, # 选型婚配比例
-    assortative_mating_strength = 0.1, # 选型婚配强度
-    # 人群分层（双人群差异）
-    crowd_stratification_differences = 0,
-    # 其他参数设置
-    beta_exp_to_out = -0.15,
-    beta_confounding_exp = 0.2,
-    beta_confounding_out = 0.2,
-    correlation = 0.2,
-    seed = NULL
+    n_snps = 3, n_pleiotropy = 0, n_null_snps = 10,
+    n_independent = 3000, p_trio = 0.5,
+    p_exp_out = 0.5, p_overlap = 1,
+    p_f = 0.3, p_m = 0.3, # p_m 当前未在SNP生成中使用
+    # 暴露效应
+    beta_fs_oe_exp = 0.5, beta_ms_oe_exp = 0.5,
+    beta_os_oe_exp = 0.5,
+    # 结局效应 (直接多效性 / 遗传叠加效应)
+    beta_fs_oe_out = 0, beta_ms_oe_out = 0,
+    beta_os_oe_out = 0, p_negative_pleiotropy = 0,
+    # 因果效应
+    beta_exp_to_out = 0,
+    # 混杂效应
+    var_confounding_exp = 0.2, var_confounding_out = 0.2,
+    # 其他参数
+    r_correlation = 0.2, n_seed = NULL,
+    # 选型婚配强度(跨性状)
+    assortative_mating_strength = 1000
 )
-small_simulation <- simulation_cmlfamily_multsnps_cpp(10, sim_params_list)
+small_simulation <- simulation_cmlfamily_multsnps_cpp(1000, sim_params_list)
 
 small_simulation_tibble <- simulation_ListtoTibble(small_simulation)
-write.csv2(as.data.frame(small_simulation_tibble$tibble),
-    file = "MR 模拟/MR 模拟结果/cml_family_ver2的模拟结果/基础测试.csv"
-)
 
+sum(small_simulation_tibble$tibble$c_p_value < 0.05) / 1000
+sum(small_simulation_tibble$tibble$b_p_value < 0.05, na.rm = TRUE) /
+    (1000 - sum(is.na(small_simulation_tibble$tibble$b_p_value)))
 # %% 大型模拟
 
 run_simulations_with_fancy_pb <- function(
