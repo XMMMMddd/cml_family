@@ -314,8 +314,8 @@ cml_family_2_cn_cpp <- function(beta_x_hat, beta_y_hat, Sigma_inv_x, Sigma_inv_y
 
 # 多起点函数
 cMl_para_multi_start_rcpp <- function(n_starts = 10,
-                                      sd_theta_start = 0.001,
-                                      sd_beta_x_start = 0.001,
+                                      sd_theta_start = 0.00001,
+                                      sd_beta_x_start = 0.00001,
                                       digits_compare = 6,
                                       min_freq_prop = 0.5,
                                       seed = NULL,
@@ -612,3 +612,5 @@ BIC_function_optimized <- function(
 
     return(as.numeric(BIC)) # 确保返回标量数值
 }
+
+

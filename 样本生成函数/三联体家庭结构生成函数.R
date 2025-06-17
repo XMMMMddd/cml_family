@@ -231,47 +231,104 @@ generate_mr_trio_data_2sample <- function(
     expose_all <- results + rnorm(length(SNPs_all), mean = 0, sd = sd_err) # 注意：rnorm的N应与SNPs_all长度一致
     return(expose_all)
   }
+  generate_outcome_function <- function(beta_exp_to_out_param, beta_OStoOE_out_param,
+                                        beta_FStoOE_out_param, beta_MStoOE_out_param,
+                                        expose_values, SNPs_self, SNPs_father_param, SNPs_mother_param,
+                                        confounder_values, correlation_factor_values) {
+    # 计算结局的确定性部分
+    outcome_deterministic <- beta_exp_to_out_param * expose_values +
+      beta_OStoOE_out_param * SNPs_self +
+      beta_FStoOE_out_param * SNPs_father_param +
+      beta_MStoOE_out_param * SNPs_mother_param +
+      confounder_values + correlation_factor_values
+
+    # 计算确定性部分的方差
+    var_results <- var(outcome_deterministic, na.rm = TRUE)
+    # 计算随机误差的标准差，以使最终结局的方差为1
+    sd_err <- sqrt(max(0, 1 - var_results))
+    # 添加随机误差，生成最终的结局值
+    outcome_all <- outcome_deterministic + rnorm(length(SNPs_self), mean = 0, sd = sd_err) # 注意：rnorm的N应与SNPs_self长度一致
+    return(outcome_all)
+  }
 
   # --- 3. 为所有 N_total 个体生成混杂因素和共享环境因素 ---
-  # 这些因素将在后续生成暴露和结局时使用
-  # 影响暴露的混杂因素 (均值为0, 方差由 confounding_exp 定义)
   confounder_exp_values <- rnorm(N_total, mean = 0, sd = sqrt(confounding_exp))
-  # 影响结局的混杂因素 (均值为0, 方差由 confounding_out 定义)
   confounder_out_values <- rnorm(N_total, mean = 0, sd = sqrt(confounding_out))
+  correlation_factor_exp_values <- rnorm(N_total, mean = 0, sd = sqrt(correlation))
+  correlation_factor_out_values <- rnorm(N_total, mean = 0, sd = sqrt(correlation))
 
-  # 共享环境因素 (例如，家庭环境，方差由 correlation 定义)
-  # 假设暴露和结局受不同(但同分布的)共享环境因素影响，或这是同一个因素的不同实现
-  correlation_factor_exp_values <- rnorm(N_total, mean = 0, sd = sqrt(correlation)) # 用于暴露
-  correlation_factor_out_values <- rnorm(N_total, mean = 0, sd = sqrt(correlation)) # 用于结局
-
-  # --- 4. 为祖父母辈生成暴露数据 (用于后续的选型婚配) ---
-  # 注意: 对祖父母而言，他们的“父母”SNP效应参数(beta_FStoOE_exp, beta_MStoOE_exp)设为0，
-  #       并且他们的“父亲”和“母亲”SNP都用自身SNP代替，因为我们不模拟曾祖父母。
-  # 父方爷爷的暴露
+  # --- 4. 为祖父母辈生成暴露数据 (用于选型婚配) ---
   Grandfather_Father_expose <- generate_expose_function(
-    beta_OStoOE_exp, 0, 0, # 自身SNP效应, 无父母SNP效应
-    Grandfather_Father_SNPs, Grandfather_Father_SNPs, Grandfather_Father_SNPs, # 自身SNP作为父母SNP传入
+    beta_OStoOE_exp, 0, 0,
+    Grandfather_Father_SNPs, Grandfather_Father_SNPs, Grandfather_Father_SNPs,
     confounder_exp_values, correlation_factor_exp_values
   )
-  # 父方奶奶的暴露
   Grandmother_Father_expose <- generate_expose_function(
     beta_OStoOE_exp, 0, 0,
     Grandmother_Father_SNPs, Grandmother_Father_SNPs, Grandmother_Father_SNPs,
     confounder_exp_values, correlation_factor_exp_values
   )
-  # 母方外公的暴露
   Grandfather_Mother_expose <- generate_expose_function(
     beta_OStoOE_exp, 0, 0,
     Grandfather_Mother_SNPs, Grandfather_Mother_SNPs, Grandfather_Mother_SNPs,
     confounder_exp_values, correlation_factor_exp_values
   )
-  # 母方外婆的暴露
   Grandmother_Mother_expose <- generate_expose_function(
     beta_OStoOE_exp, 0, 0,
     Grandmother_Mother_SNPs, Grandmother_Mother_SNPs, Grandmother_Mother_SNPs,
     confounder_exp_values, correlation_factor_exp_values
   )
 
+
+  Grandfather_Father_outcome <- generate_outcome_function(
+    beta_exp_to_out, 0, 0, 0,
+    Grandfather_Father_expose, Grandfather_Father_SNPs, Grandfather_Father_SNPs, Grandfather_Father_SNPs,
+    confounder_out_values, correlation_factor_out_values
+  )
+  Grandmother_Father_outcome <- generate_outcome_function(
+    beta_exp_to_out, 0, 0, 0,
+    Grandmother_Father_expose, Grandmother_Father_SNPs, Grandmother_Father_SNPs, Grandmother_Father_SNPs,
+    confounder_out_values, correlation_factor_out_values
+  )
+  Grandfather_Mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, 0, 0, 0,
+    Grandfather_Mother_expose, Grandfather_Mother_SNPs, Grandfather_Mother_SNPs, Grandfather_Mother_SNPs,
+    confounder_out_values, correlation_factor_out_values
+  )
+  Grandmother_Mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, 0, 0, 0,
+    Grandmother_Mother_expose, Grandmother_Mother_SNPs, Grandmother_Mother_SNPs, Grandmother_Mother_SNPs,
+    confounder_out_values, correlation_factor_out_values
+  )
+
+
+  # --- 5. 定义选型婚配函数 ---
+  assortative_mating_function <- function(snps_1, expose_1, snps_2, expose_2,
+                                          am_strength) {
+    object_1 <- data.frame(snps = snps_1, expose = expose_1)
+    object_2 <- data.frame(snps = snps_2, expose = expose_2)
+    object_1 <- object_1 %>% dplyr::mutate(expose_star = expose + rnorm(dplyr::n(), mean = 0, sd = sqrt(am_strength)))
+    object_2 <- object_2 %>% dplyr::mutate(expose_star = expose + rnorm(dplyr::n(), mean = 0, sd = sqrt(am_strength)))
+    object_1 <- dplyr::arrange(object_1, expose_star)
+    object_2 <- dplyr::arrange(object_2, expose_star)
+    return(list(object_1, object_2))
+  }
+
+  # --- 6. 对祖父母辈进行选型婚配 ---
+  grand_father_am_results <- assortative_mating_function(
+    Grandfather_Father_SNPs, Grandfather_Father_expose,
+    Grandmother_Father_SNPs, Grandmother_Father_outcome,
+    assortative_mating_strength
+  )
+  grand_mother_am_results <- assortative_mating_function(
+    Grandfather_Mother_SNPs, Grandfather_Mother_expose,
+    Grandmother_Mother_SNPs, Grandmother_Mother_outcome,
+    assortative_mating_strength
+  )
+  Grandfather_Father_SNPs <- grand_father_am_results[[1]]$snps
+  Grandmother_Father_SNPs <- grand_father_am_results[[2]]$snps
+  Grandfather_Mother_SNPs <- grand_mother_am_results[[1]]$snps
+  Grandmother_Mother_SNPs <- grand_mother_am_results[[2]]$snps
   # --- 5. 定义选型婚配函数 ---
   #' @title (内部辅助函数) 执行选型婚配
   #' @description 根据个体的暴露代理表型对两组个体进行排序，以模拟选型婚配。
@@ -283,25 +340,7 @@ generate_mr_trio_data_2sample <- function(
   #' @param am_strength 数值型。选型婚配强度参数 (噪音的方差)。
   #' @return 一个列表，包含两个排序后的数据框 (object_1, object_2)。
   #'         每个数据框包含排序后的 snps 和 expose，以及用于排序的 expose_star。
-  assortative_mating_function <- function(snps_1, expose_1, snps_2, expose_2,
-                                          am_strength) {
-    # 创建包含SNP和暴露的数据框
-    object_1 <- data.frame(snps = snps_1, expose = expose_1)
-    object_2 <- data.frame(snps = snps_2, expose = expose_2)
 
-    # 生成用于选型婚配的暴露代理表型 (真实暴露 + 随机噪音)
-    # 噪音的标准差是 sqrt(am_strength)
-    object_1 <- object_1 %>% mutate(expose_star = expose +
-      rnorm(n(), mean = 0, sd = sqrt(am_strength)))
-    object_2 <- object_2 %>% mutate(expose_star = expose +
-      rnorm(n(), mean = 0, sd = sqrt(am_strength)))
-
-    # 根据暴露代理表型对两组个体分别进行升序排序
-    object_1 <- arrange(object_1, expose_star)
-    object_2 <- arrange(object_2, expose_star)
-    # 排序后，object_1的第一行将与object_2的第一行配对，以此类推。
-    return(list(object_1, object_2))
-  }
 
   # --- 6. 对祖父母辈进行选型婚配 ---
   # 父系祖父母 (爷爷奶奶) 进行选型婚配
@@ -347,16 +386,32 @@ generate_mr_trio_data_2sample <- function(
     confounder_exp_values, correlation_factor_exp_values
   )
 
+  # --- 12. 为父亲、母亲和子代生成结局数据 ---
+  # 父亲的结局
+  Father_outcome <- generate_outcome_function(
+    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
+    Father_expose, Father_SNPs, Grandfather_Father_SNPs, Grandmother_Father_SNPs, # 父亲的"父母"是爷爷奶奶
+    confounder_out_values, correlation_factor_out_values
+  )
+  # 母亲的结局
+  Mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
+    Mother_expose, Mother_SNPs, Grandfather_Mother_SNPs, Grandmother_Mother_SNPs, # 母亲的"父母"是外公外婆
+    confounder_out_values, correlation_factor_out_values
+  )
   # --- 9. 对父母代进行选型婚配 ---
   parent_am_results <- assortative_mating_function(
     Father_SNPs, Father_expose, # 父亲的信息
-    Mother_SNPs, Mother_expose, # 母亲的信息
+    Mother_SNPs, Mother_outcome, # 母亲的信息
     assortative_mating_strength
   )
   # 更新父母的SNP和暴露向量，使其根据选型婚配的结果重新排序
   Father_SNPs <- parent_am_results[[1]]$snps # 排序后的父亲SNP
   Mother_SNPs <- parent_am_results[[2]]$snps # 排序后并与父亲配对的母亲SNP
   Father_expose <- parent_am_results[[1]]$expose # 排序后的父亲暴露
+  Mother_expose <- parent_am_results[[2]]$expose # 排序后的父亲暴露
+  # 子代的结局
+
   Mother_expose <- parent_am_results[[2]]$expose # 排序后并与父亲配对的母亲暴露
 
   # --- 10. 生成子代基因型和暴露数据 ---
@@ -371,61 +426,11 @@ generate_mr_trio_data_2sample <- function(
     confounder_exp_values, correlation_factor_exp_values
   )
 
-  # --- 11. 定义结局生成函数 ---
-  #' @title (内部辅助函数) 生成结局表型数据
-  #' @description 根据暴露值、个体自身SNP、父母SNP(遗传叠加效应/多效性)、混杂因素和共享环境因素生成结局表型。
-  #'              生成的结局值会进行标准化，使得其总方差近似为1。
-  #' @param beta_exp_to_out_param 数值型。暴露对结局的因果效应系数。 (参数名修改以避免与外部变量冲突)
-  #' @param beta_OStoOE_out_param 数值型。个体自身SNP对结局的效应系数 (基因多效性)。
-  #' @param beta_FStoOE_out_param 数值型。父亲SNP对个体(子代)结局的效应系数。
-  #' @param beta_MStoOE_out_param 数值型。母亲SNP对个体(子代)结局的效应系数。
-  #' @param expose_values 数值向量。个体的暴露值。 (参数名修改)
-  #' @param SNPs_self 数值向量。个体自身的SNP基因型。 (参数名修改)
-  #' @param SNPs_father_param 数值向量。个体父亲的SNP基因型。(参数名修改)
-  #' @param SNPs_mother_param 数值向量。个体母亲的SNP基因型。(参数名修改)
-  #' @param confounder_values 数值向量。影响结局的混杂因素。 (参数名修改)
-  #' @param correlation_factor_values 数值向量。影响结局的共享环境因素。 (参数名修改)
-  #' @return 数值向量。生成的结局表型值。
-  generate_outcome_function <- function(beta_exp_to_out_param, beta_OStoOE_out_param,
-                                        beta_FStoOE_out_param, beta_MStoOE_out_param,
-                                        expose_values, SNPs_self, SNPs_father_param, SNPs_mother_param,
-                                        confounder_values, correlation_factor_values) {
-    # 计算结局的确定性部分
-    outcome_deterministic <- beta_exp_to_out_param * expose_values +
-      beta_OStoOE_out_param * SNPs_self +
-      beta_FStoOE_out_param * SNPs_father_param +
-      beta_MStoOE_out_param * SNPs_mother_param +
-      confounder_values + correlation_factor_values
-
-    # 计算确定性部分的方差
-    var_results <- var(outcome_deterministic, na.rm = TRUE)
-    # 计算随机误差的标准差，以使最终结局的方差为1
-    sd_err <- sqrt(max(0, 1 - var_results))
-    # 添加随机误差，生成最终的结局值
-    outcome_all <- outcome_deterministic + rnorm(length(SNPs_self), mean = 0, sd = sd_err) # 注意：rnorm的N应与SNPs_self长度一致
-    return(outcome_all)
-  }
-
-  # --- 12. 为父亲、母亲和子代生成结局数据 ---
-  # 父亲的结局
-  Father_outcome <- generate_outcome_function(
-    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
-    Father_expose, Father_SNPs, Grandfather_Father_SNPs, Grandmother_Father_SNPs, # 父亲的"父母"是爷爷奶奶
-    confounder_out_values, correlation_factor_out_values
-  )
-  # 母亲的结局
-  Mother_outcome <- generate_outcome_function(
-    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
-    Mother_expose, Mother_SNPs, Grandfather_Mother_SNPs, Grandmother_Mother_SNPs, # 母亲的"父母"是外公外婆
-    confounder_out_values, correlation_factor_out_values
-  )
-  # 子代的结局
   Offspring_outcome <- generate_outcome_function(
     beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
     Offspring_expose, Offspring_SNPs, Father_SNPs, Mother_SNPs, # 子代的父母是Father和Mother
     confounder_out_values, correlation_factor_out_values
   )
-
   # --- 13. 创建包含所有模拟信息的完整数据集 ---
   # 这个数据集包含了 N_total 个家庭（父亲-母亲-子代）的完整信息
   data_all <- data.frame(
@@ -727,6 +732,583 @@ generate_multiple_datasets_v3 <- function(
   # --- 5. 返回包含合并后的暴露和结局数据的列表 ---
   return(list(exposure_data = combined_exposure_data, outcome_data = combined_outcome_data))
 }
+
+# %%
+
+generate_snp_hwe <- function(n_samples, maf) {
+  # 根据次要等位基因频率(maf)计算基因型频率
+  # AA (记为2), Aa (记为1), aa (记为0)
+  # 假设'a'是次要等位基因, 'A'是主要等位基因
+  # p = maf (a的频率), q = 1-maf (A的频率)
+  # 基因型频率: aa (p^2), Aa (2pq), AA (q^2)
+  genotype_freqs <- c(maf^2, 2 * maf * (1 - maf), (1 - maf)^2)
+  genotypes <- sample(c(0, 1, 2), size = n_samples, replace = TRUE, prob = genotype_freqs)
+  return(genotypes)
+}
+generate_mr_trio_data_sample <- function(
+    n = 1000,
+    p_f = 0.3, p_m = 0.3, # p_m 当前未在SNP生成中使用
+    # 暴露效应
+    beta_FStoOE_exp = 0.3, beta_MStoOE_exp = 0.3,
+    beta_OStoOE_exp = 0.3,
+    # 结局效应 (直接多效性 / 遗传叠加效应)
+    beta_FStoOE_out = 0, beta_MStoOE_out = 0,
+    beta_OStoOE_out = 0,
+    # 因果效应
+    beta_exp_to_out = 0.4,
+    # 混杂效应
+    confounding_exp = 0.2, confounding_out = 0.2,
+    # 其他参数
+    correlation = 0.2, seed = NULL,
+    # 选型婚配强度
+    assortative_mating_strength = 1000,
+    sample.outcome.betas.from.range = FALSE) {
+  # --- 0. 设置随机种子 (确保结果可重复性) ---
+  set.seed(seed)
+
+
+
+  #' @return 一个长度为N的数值向量，包含生成的基因型 (0, 1, 或 2)。
+  internal_generate_hwe_snps <- function(N, p) {
+    if (!is.numeric(p) || length(p) != 1 || p < 0 || p > 1) {
+      stop("内部错误: internal_generate_hwe_snps 函数的 'p' 参数必须是0到1之间的单个数值。")
+    }
+    # 基因型频率: AA (记为2), Aa (记为1), aa (记为0)
+    # p 是等位基因 A 的频率, (1-p) 是等位基因 a 的频率
+    genotype_freqs <- c(p^2, 2 * p * (1 - p), (1 - p)^2) # 对应基因型 AA, Aa, aa
+    # 使用 R 的 sample 函数生成基因型
+    # 注意：提供的基因型值顺序与频率顺序对应 (2对应p^2, 1对应2pq, 0对应(1-p)^2)
+    genotypes <- sample(c(2, 1, 0), size = N, replace = TRUE, prob = genotype_freqs)
+    return(genotypes)
+  }
+
+
+  internal_get_transmitted_allele <- function(parent_snps) {
+    transmitted_alleles <- numeric(length(parent_snps))
+    for (i in seq_along(parent_snps)) {
+      genotype <- parent_snps[i]
+      if (genotype == 0) { # 亲本基因型 aa, 必定传递 a (编码为0)
+        transmitted_alleles[i] <- 0
+      } else if (genotype == 2) { # 亲本基因型 AA, 必定传递 A (编码为1)
+        transmitted_alleles[i] <- 1
+      } else if (genotype == 1) { # 亲本基因型 Aa, 传递 A 或 a 的概率各为50%
+        transmitted_alleles[i] <- rbinom(1, 1, 0.5) # 随机传递0或1
+      } else {
+        warning(paste("在 internal_get_transmitted_allele 中发现无效的亲本基因型:", genotype, "位于索引", i, "- 将传递NA值"))
+        transmitted_alleles[i] <- NA
+      }
+    }
+    return(transmitted_alleles)
+  }
+
+
+
+  # 父方祖父母 (爷爷、奶奶)
+  Grandfather_Father_SNPs <- generate_snp_hwe(n_samples = n, maf = p_f)
+  Grandmother_Father_SNPs <- generate_snp_hwe(n_samples = n, maf = p_f)
+
+  # 母方祖父母 (外公、外婆)
+  Grandfather_Mother_SNPs <- generate_snp_hwe(n_samples = n, maf = p_f)
+  Grandmother_Mother_SNPs <- generate_snp_hwe(n_samples = n, maf = p_f)
+
+
+  # --- 2. 定义暴露和结局的生成函数 ---
+
+
+  generate_expose_function <- function(beta_StoE_exp,
+                                       beta_FStoOE_exp, beta_MStoOE_exp,
+                                       SNPs_all,
+                                       SNPs_Father,
+                                       SNPs_Mother,
+                                       confounder, correlation_factor) {
+    # 计算暴露的确定性部分 (遗传效应 + 混杂 + 共享环境)
+    results <- beta_StoE_exp * SNPs_all +
+      beta_FStoOE_exp * SNPs_Father +
+      beta_MStoOE_exp * SNPs_Mother +
+      confounder + correlation_factor
+
+    # 计算确定性部分的方差
+    var_results <- var(results, na.rm = TRUE)
+
+    # 计算随机误差的标准差，以使最终暴露的方差为1
+    # 如果 var_results >= 1, 则误差标准差为0
+    sd_err <- sqrt(max(0, 1 - var_results))
+
+    # 添加随机误差，生成最终的暴露值
+    expose_all <- results + rnorm(length(SNPs_all), mean = 0, sd = sd_err) # 注意：rnorm的N应与SNPs_all长度一致
+    return(expose_all)
+  }
+  generate_outcome_function <- function(beta_exp_to_out_param,
+                                        beta_OStoOE_out_param,
+                                        beta_FStoOE_out_param,
+                                        beta_MStoOE_out_param,
+                                        expose_values, SNPs_self,
+                                        SNPs_father_param, SNPs_mother_param,
+                                        confounder_values, correlation_factor_values) {
+    # 计算结局的确定性部分
+    outcome_deterministic <- beta_exp_to_out_param * expose_values +
+      beta_OStoOE_out_param * SNPs_self +
+      beta_FStoOE_out_param * SNPs_father_param +
+      beta_MStoOE_out_param * SNPs_mother_param +
+      confounder_values + correlation_factor_values
+
+    # 计算确定性部分的方差
+    var_results <- var(outcome_deterministic, na.rm = TRUE)
+    # 计算随机误差的标准差，以使最终结局的方差为1
+    sd_err <- sqrt(max(0, 1 - var_results))
+    # 添加随机误差，生成最终的结局值
+    outcome_all <- outcome_deterministic + rnorm(length(SNPs_self),
+      mean = 0, sd = sd_err
+    ) # 注意：rnorm的N应与SNPs_self长度一致
+    return(outcome_all)
+  }
+
+  # --- 3. 为所有 N_total 个体生成混杂因素和共享环境因素 ---
+  confounder_exp_values <- rnorm(n,
+    mean = 0,
+    sd = sqrt(confounding_exp)
+  )
+  confounder_out_values <- rnorm(n,
+    mean = 0,
+    sd = sqrt(confounding_out)
+  )
+  correlation_factor_exp_values <- rnorm(n,
+    mean = 0,
+    sd = sqrt(correlation)
+  )
+  correlation_factor_out_values <- rnorm(n,
+    mean = 0,
+    sd = sqrt(correlation)
+  )
+
+  # --- 4. 为祖父母辈生成暴露数据 (用于选型婚配) ---
+  Grandfather_Father_expose <- generate_expose_function(
+    beta_OStoOE_exp, 0, 0,
+    Grandfather_Father_SNPs, Grandfather_Father_SNPs, Grandfather_Father_SNPs,
+    confounder_exp_values, correlation_factor_exp_values
+  )
+  Grandmother_Father_expose <- generate_expose_function(
+    beta_OStoOE_exp, 0, 0,
+    Grandmother_Father_SNPs, Grandmother_Father_SNPs, Grandmother_Father_SNPs,
+    confounder_exp_values, correlation_factor_exp_values
+  )
+  Grandfather_Mother_expose <- generate_expose_function(
+    beta_OStoOE_exp, 0, 0,
+    Grandfather_Mother_SNPs, Grandfather_Mother_SNPs, Grandfather_Mother_SNPs,
+    confounder_exp_values, correlation_factor_exp_values
+  )
+  Grandmother_Mother_expose <- generate_expose_function(
+    beta_OStoOE_exp, 0, 0,
+    Grandmother_Mother_SNPs, Grandmother_Mother_SNPs, Grandmother_Mother_SNPs,
+    confounder_exp_values, correlation_factor_exp_values
+  )
+
+
+  Grandfather_Father_outcome <- generate_outcome_function(
+    beta_exp_to_out, 0, 0, 0,
+    Grandfather_Father_expose, Grandfather_Father_SNPs, Grandfather_Father_SNPs, Grandfather_Father_SNPs,
+    confounder_out_values, correlation_factor_out_values
+  )
+  Grandmother_Father_outcome <- generate_outcome_function(
+    beta_exp_to_out, 0, 0, 0,
+    Grandmother_Father_expose, Grandmother_Father_SNPs, Grandmother_Father_SNPs, Grandmother_Father_SNPs,
+    confounder_out_values, correlation_factor_out_values
+  )
+  Grandfather_Mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, 0, 0, 0,
+    Grandfather_Mother_expose, Grandfather_Mother_SNPs, Grandfather_Mother_SNPs, Grandfather_Mother_SNPs,
+    confounder_out_values, correlation_factor_out_values
+  )
+  Grandmother_Mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, 0, 0, 0,
+    Grandmother_Mother_expose, Grandmother_Mother_SNPs, Grandmother_Mother_SNPs, Grandmother_Mother_SNPs,
+    confounder_out_values, correlation_factor_out_values
+  )
+
+
+  # --- 5. 定义选型婚配函数 ---
+  assortative_mating_function <- function(snps_1, expose_1, snps_2, expose_2,
+                                          am_strength) {
+    object_1 <- data.frame(snps = snps_1, expose = expose_1)
+    object_2 <- data.frame(snps = snps_2, expose = expose_2)
+    object_1 <- object_1 %>% dplyr::mutate(
+      expose_star =
+        expose + rnorm(dplyr::n(), mean = 0, sd = sqrt(am_strength))
+    )
+    object_2 <- object_2 %>% dplyr::mutate(
+      expose_star =
+        expose + rnorm(dplyr::n(), mean = 0, sd = sqrt(am_strength))
+    )
+    object_1 <- dplyr::arrange(object_1, expose_star)
+    object_2 <- dplyr::arrange(object_2, expose_star)
+    return(list(object_1, object_2))
+  }
+
+  # --- 6. 对祖父母辈进行选型婚配 ---
+  grand_father_am_results <- assortative_mating_function(
+    Grandfather_Father_SNPs, Grandfather_Father_expose,
+    Grandmother_Father_SNPs, Grandmother_Father_outcome,
+    assortative_mating_strength
+  )
+  grand_mother_am_results <- assortative_mating_function(
+    Grandfather_Mother_SNPs, Grandfather_Mother_expose,
+    Grandmother_Mother_SNPs, Grandmother_Mother_outcome,
+    assortative_mating_strength
+  )
+  Grandfather_Father_SNPs <- grand_father_am_results[[1]]$snps
+  Grandmother_Father_SNPs <- grand_father_am_results[[2]]$snps
+  Grandfather_Mother_SNPs <- grand_mother_am_results[[1]]$snps
+  Grandmother_Mother_SNPs <- grand_mother_am_results[[2]]$snps
+
+
+  # --- 7. 生成父母代基因型 (通过模拟祖父母向父母传递等位基因) ---
+  # 父亲的基因型 = 爷爷传递的等位基因 + 奶奶传递的等位基因
+  Father_SNPs <- internal_get_transmitted_allele(Grandfather_Father_SNPs) +
+    internal_get_transmitted_allele(Grandmother_Father_SNPs)
+  # 母亲的基因型 = 外公传递的等位基因 + 外婆传递的等位基因
+  Mother_SNPs <- internal_get_transmitted_allele(Grandfather_Mother_SNPs) +
+    internal_get_transmitted_allele(Grandmother_Mother_SNPs)
+
+  # --- 8. 为父母代生成暴露数据 (用于他们之间的选型婚配) ---
+  # 父亲的暴露，受其自身SNP以及其父母(即子代的祖父母)SNP的遗传叠加效应影响
+  Father_expose <- generate_expose_function(
+    beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp, # 自身、其父(爷爷)、其母(奶奶)的SNP效应
+    Father_SNPs, Grandfather_Father_SNPs, Grandmother_Father_SNPs,
+    confounder_exp_values, correlation_factor_exp_values
+  )
+  # 母亲的暴露，受其自身SNP以及其父母(即子代的外祖父母)SNP的遗传叠加效应影响
+  Mother_expose <- generate_expose_function(
+    beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp, # 自身、其父(外公)、其母(外婆)的SNP效应
+    Mother_SNPs, Grandfather_Mother_SNPs, Grandmother_Mother_SNPs, # 注意这里应该是祖父母的SNPs
+    confounder_exp_values, correlation_factor_exp_values
+  )
+
+  # --- 12. 为父亲、母亲和子代生成结局数据 ---
+  # 父亲的结局
+  Father_outcome <- generate_outcome_function(
+    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
+    Father_expose, Father_SNPs, Grandfather_Father_SNPs, Grandmother_Father_SNPs, # 父亲的"父母"是爷爷奶奶
+    confounder_out_values, correlation_factor_out_values
+  )
+  # 母亲的结局
+  Mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
+    Mother_expose, Mother_SNPs, Grandfather_Mother_SNPs, Grandmother_Mother_SNPs, # 母亲的"父母"是外公外婆
+    confounder_out_values, correlation_factor_out_values
+  )
+  # --- 9. 对父母代进行选型婚配 ---
+  parent_am_results <- assortative_mating_function(
+    Father_SNPs, Father_expose, # 父亲的信息
+    Mother_SNPs, Mother_outcome, # 母亲的信息
+    assortative_mating_strength
+  )
+  # 更新父母的SNP和暴露向量，使其根据选型婚配的结果重新排序
+  Father_SNPs <- parent_am_results[[1]]$snps # 排序后的父亲SNP
+  Mother_SNPs <- parent_am_results[[2]]$snps # 排序后并与父亲配对的母亲SNP
+  Mother_SNPs <- parent_am_results[[2]]$snps
+  Father_expose <- generate_expose_function(
+    beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp, # 自身、其父(爷爷)、其母(奶奶)的SNP效应
+    Father_SNPs, Grandfather_Father_SNPs, Grandmother_Father_SNPs,
+    confounder_exp_values, correlation_factor_exp_values
+  )
+  # 母亲的暴露，受其自身SNP以及其父母(即子代的外祖父母)SNP的遗传叠加效应影响
+  Mother_expose <- generate_expose_function(
+    beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp, # 自身、其父(外公)、其母(外婆)的SNP效应
+    Mother_SNPs, Grandfather_Mother_SNPs, Grandmother_Mother_SNPs, # 注意这里应该是祖父母的SNPs
+    confounder_exp_values, correlation_factor_exp_values
+  )
+
+  # --- 12. 为父亲、母亲和子代生成结局数据 ---
+  # 父亲的结局
+  Father_outcome <- generate_outcome_function(
+    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
+    Father_expose, Father_SNPs, Grandfather_Father_SNPs, Grandmother_Father_SNPs, # 父亲的"父母"是爷爷奶奶
+    confounder_out_values, correlation_factor_out_values
+  )
+  # 母亲的结局
+  Mother_outcome <- generate_outcome_function(
+    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
+    Mother_expose, Mother_SNPs, Grandfather_Mother_SNPs, Grandmother_Mother_SNPs, # 母亲的"父母"是外公外婆
+    confounder_out_values, correlation_factor_out_values
+  )
+  # --- 9. 对父母代进行选型婚配 ---
+
+
+
+
+
+  # --- 10. 生成子代基因型和暴露数据 ---
+  # 子代的基因型 = 父亲传递的等位基因 + 母亲传递的等位基因
+  Offspring_SNPs <- internal_get_transmitted_allele(Father_SNPs) +
+    internal_get_transmitted_allele(Mother_SNPs)
+
+  # 子代的暴露，受其自身SNP以及其父母SNP的遗传叠加效应影响
+  Offspring_expose <- generate_expose_function(
+    beta_OStoOE_exp, beta_FStoOE_exp, beta_MStoOE_exp, # 自身、父亲、母亲的SNP效应
+    Offspring_SNPs, Father_SNPs, Mother_SNPs,
+    confounder_exp_values, correlation_factor_exp_values
+  )
+  Offspring_outcome <- generate_outcome_function(
+    beta_exp_to_out, beta_OStoOE_out, beta_FStoOE_out, beta_MStoOE_out,
+    Offspring_expose, Offspring_SNPs, Father_SNPs, Mother_SNPs, # 子代的父母是Father和Mother
+    confounder_out_values, correlation_factor_out_values
+  )
+  data <- data.frame(
+    Father_SNPs = Father_SNPs,
+    Mother_SNPs = Mother_SNPs,
+    Offspring_SNPs = Offspring_SNPs,
+    Father_expose = Father_expose,
+    Mother_expose = Mother_expose,
+    Offspring_expose = Offspring_expose,
+    Father_outcome = Father_outcome,
+    Mother_outcome = Mother_outcome,
+    Offspring_outcome = Offspring_outcome
+  )
+
+  return(
+    data = data
+  )
+}
+generate_multiple_datasets_v4 <- function(
+    n = 10, # 要生成的总数据集数量
+    num_pleiotropic = 0,
+    n_expose_heterogeneity = 0,
+    N_exp = 1000, N_out = 1000,
+    p_f = 0.3, p_m = 0.3,
+    # --- 暴露效应 (当非零时的大小) ---
+    beta_FStoOE_exp = 0.1, beta_MStoOE_exp = 0.1,
+    beta_OStoOE_exp = 0.3,
+    # --- 暴露异质性 ---
+    h_beta_FStoOE_exp = 0.1, h_beta_MStoOE_exp = 0.1,
+    h_beta_OStoOE_exp = 0.3,
+    # --- 结局效应 / 水平多效性 (当非零时的分布参数) ---
+    # 子代基因型 -> 结局 (遗传叠加效应或基因多效性)
+    mean_beta_FStoOE_out = 0.1, sd_beta_FStoOE_out = 0.05,
+    mean_beta_MStoOE_out = 0.1, sd_beta_MStoOE_out = 0.05,
+    # 父母基因型 -> 结局 (应为子代自身SNP对结局的效应，即基因多效性; 参数名可能需对应调整)
+    mean_beta_OStoOE_out = 0.1, sd_beta_OStoOE_out = 0.05,
+    prop_negative_pleiotropy = 0.5, # 在指定为多效性的SNP中，其效应为负的比例 (0 到 1)
+    # 选型婚配
+    assortative_mating_prob = 0,
+    assortative_mating_strength = 0, # 选型婚配对结局的影响因子
+    # 人群分层
+    ## 定义人群分层的差异(次等位基因频率差异)
+    crowd_stratification_differences = 0, # 用于模拟两个具有不同等位基因频率的亚群
+    # --- 其他效应 ---
+    beta_exp_to_out = 0, # 暴露对结局的真实因果效应
+    beta_confounding_exp = 0.2, # 影响暴露的混杂因素的方差 (效应大小为1)
+    beta_confounding_out = 0.2, # 影响结局的混杂因素的方差 (效应大小为1)
+    correlation = 0.2, # 共享环境因素的方差
+    seed = NULL) { # 随机数种子
+
+  # --- 1. 输入验证与随机种子设置 ---
+  if (!is.null(seed)) {
+    set.seed(seed) # 设置随机种子以保证结果可重复性
+  }
+
+  # --- 2. 确定哪些数据集的SNP将具有潜在的多效性 ---
+  n_pool <- 1:n # 创建一个从1到n的索引池
+  # 从索引池中随机抽取 num_pleiotropic 个索引，这些索引对应的数据集将具有潜在的多效性SNP
+  pleiotropic_indices <- sample(n_pool, num_pleiotropic)
+  # 其余索引对应的数据集将作为有效的工具变量（无多效性）
+  not_pleiotropic_indices <- setdiff(n_pool, pleiotropic_indices)
+
+  expose_heterogeneity_indices <- sample(n_pool, n_expose_heterogeneity)
+  not_expose_heterogeneity_indices <- setdiff(
+    n_pool,
+    expose_heterogeneity_indices
+  )
+  # --- 3. 循环生成 n 个独立的数据集 ---
+  all_datasets <- vector("list", n) # 初始化一个列表以存储所有生成的数据集
+
+  for (i in 1:n) { # 对每个数据集进行循环
+    # --- 3a. 判断当前数据集 i 的特性 ---
+    # 检查当前数据集的索引 i 是否在之前抽取的 "pleiotropic_indices" 中
+    is_pleiotropic_candidate <- i %in%
+      pleiotropic_indices # 如果为 TRUE, 则此数据集的SNP是潜在多效性的
+
+    is_expose_heterogeneity_candidate <- i %in%
+      expose_heterogeneity_indices
+
+    # --- 3b. 为当前循环设置将要传递给底层数据生成函数的 beta 参数值 ---
+
+    # --- 暴露效应参数 (在所有数据集中保持不变) ---
+    if (is_expose_heterogeneity_candidate) {
+      current_beta_FStoOE_exp <- beta_FStoOE_exp
+      current_beta_MStoOE_exp <- beta_MStoOE_exp
+      current_beta_OStoOE_exp <- beta_OStoOE_exp
+
+      current_h_beta_FStoOE_exp <- h_beta_FStoOE_exp
+      current_h_beta_MStoOE_exp <- h_beta_MStoOE_exp
+      current_h_beta_OStoOE_exp <- h_beta_OStoOE_exp
+
+      expose_heterogeneity_index <- "具有暴露异质性"
+    } else {
+      current_beta_FStoOE_exp <- beta_FStoOE_exp
+      current_beta_MStoOE_exp <- beta_MStoOE_exp
+      current_beta_OStoOE_exp <- beta_OStoOE_exp
+
+      current_h_beta_FStoOE_exp <- beta_FStoOE_exp
+      current_h_beta_MStoOE_exp <- beta_MStoOE_exp
+      current_h_beta_OStoOE_exp <- beta_OStoOE_exp
+      expose_heterogeneity_index <- "无暴露异质性"
+    }
+
+
+
+    # --- 结局效应 / 水平多效性参数 (核心修改部分) ---
+    if (is_pleiotropic_candidate) {
+      # 如果当前SNP是潜在多效性的:
+      direction_multiplier <- if (runif(1) < prop_negative_pleiotropy) -1 else 1
+
+      current_beta_FStoOE_out <- rnorm(1,
+        mean = direction_multiplier *
+          mean_beta_FStoOE_out, sd = sd_beta_FStoOE_out
+      )
+      current_beta_MStoOE_out <- rnorm(1,
+        mean = direction_multiplier *
+          mean_beta_MStoOE_out, sd = sd_beta_MStoOE_out
+      )
+      current_beta_OStoOE_out <- rnorm(1,
+        mean = direction_multiplier *
+          mean_beta_OStoOE_out, sd = sd_beta_OStoOE_out
+      )
+
+      snp_label <- "pleiotropic_variable"
+    } else {
+      # 如果当前SNP不是多效性的 (即，它是一个有效的工具变量):
+      # 将其对结局的直接效应（多效性效应）设置为 0。
+      current_beta_FStoOE_out <- 0
+      current_beta_MStoOE_out <- 0
+      current_beta_OStoOE_out <- 0
+
+      snp_label <- "valid_instrument" # 标记此SNP为有效工具变量
+    }
+
+    # --- 选型婚配参数设置 ---
+    # 根据 compatibility_selection_prop 概率决定当前数据集是否应用选型婚配
+    is_compatibility_selection <- if (runif(1) <
+      assortative_mating_prob) {
+      1
+    } else {
+      0
+    }
+    if (is_compatibility_selection == 1) {
+      # 如果应用选型婚配，则使用函数输入的选型婚配参数
+      current_assortative_mating_strength <-
+        assortative_mating_strength
+    } else {
+      current_assortative_mating_strength <- 1000 # 对结局的影响因子设为0
+    }
+
+    # --- 人群分层参数设置 ---
+    # 为当前数据集随机选择等位基因频率，以模拟人群分层
+    # current_p_f 从 (p_f, p_f + 差异) 中随机选一个
+    current_p_f <- sample(c(p_f, p_f + crowd_stratification_differences), 1)
+    # current_p_m 从 (p_m, p_m + 差异) 中随机选一个
+    current_p_m <- sample(c(p_m, p_m + crowd_stratification_differences), 1)
+
+    # --- 3c. 调用底层函数 (generate_mr_trio_data_2sample) 生成单个数据集 ---
+
+    data_exp <- generate_mr_trio_data_sample(
+      n = N_exp,
+      p_f = current_p_f, p_m = current_p_m, # 使用当前循环的等位基因频率
+      beta_FStoOE_exp = current_beta_FStoOE_exp,
+      beta_MStoOE_exp = current_beta_MStoOE_exp,
+      beta_OStoOE_exp = current_beta_OStoOE_exp,
+      # 传递当前循环抽样生成的或设为0的结局效应值
+      beta_FStoOE_out = current_beta_FStoOE_out,
+      beta_MStoOE_out = current_beta_MStoOE_out,
+      beta_OStoOE_out = current_beta_OStoOE_out,
+      beta_exp_to_out = beta_exp_to_out,
+      confounding_exp = beta_confounding_exp,
+      confounding_out = beta_confounding_out,
+      correlation = correlation, seed = NULL,
+      assortative_mating_strength = current_assortative_mating_strength
+    )
+
+
+    data_out <- generate_mr_trio_data_sample(
+      n = N_out,
+      p_f = current_p_f, p_m = current_p_m, # 使用当前循环的等位基因频率
+      beta_FStoOE_exp = current_h_beta_FStoOE_exp,
+      beta_MStoOE_exp = current_h_beta_MStoOE_exp,
+      beta_OStoOE_exp = current_h_beta_OStoOE_exp,
+      # 传递当前循环抽样生成的或设为0的结局效应值
+      beta_FStoOE_out = current_beta_FStoOE_out,
+      beta_MStoOE_out = current_beta_MStoOE_out,
+      beta_OStoOE_out = current_beta_OStoOE_out,
+      beta_exp_to_out = beta_exp_to_out,
+      confounding_exp = beta_confounding_exp,
+      confounding_out = beta_confounding_out,
+      correlation = correlation, seed = NULL,
+      assortative_mating_strength = current_assortative_mating_strength
+    )
+    data_i <- list(data_exp, data_out)
+
+    # --- 3d. 为生成的数据集添加唯一的 dataset_id 和 SNP 类型标签 ---
+    # 检查底层函数返回结果的格式是否符合预期 (一个包含至少两个数据框的列表)
+    if (length(data_i) >= 2 && is.data.frame(data_i[[1]]) && is.data.frame(data_i[[2]])) {
+      data_i[[1]]$dataset_id <- i # 为暴露数据框添加 dataset_id
+      data_i[[2]]$dataset_id <- i # 为结局数据框添加 dataset_id
+      # 添加 SNP 类型标签 (例如 "pleiotropic_variable" 或 "valid_instrument")
+      data_i[[1]]$snp_type <- snp_label
+      data_i[[2]]$snp_type <- snp_label
+      data_i[[1]]$expose_heterogeneity_index <- expose_heterogeneity_index
+      data_i[[2]]$expose_heterogeneity_index <- expose_heterogeneity_index
+    } else {
+      warning(paste("数据集", i, "的生成结果格式不符合预期 (data_i 不是包含两个数据框的列表)，无法添加 ID 和标签。"))
+    }
+    all_datasets[[i]] <- data_i # 将生成的单个数据集 (data_i) 存储到总列表 all_datasets 中
+  } # 结束 for 循环 (生成 n 个数据集)
+
+  # --- 4. 合并所有独立生成的数据集 ---
+  # 分别提取所有数据集中的暴露数据框和结局数据框
+  all_exposure_dfs <- lapply(all_datasets, function(element) {
+    if (length(element) >= 1 && is.data.frame(element[[1]])) {
+      return(element[[1]]) # 返回暴露数据框
+    } else {
+      warning("在合并数据时，发现一个元素的结构不符合预期 (缺少暴露数据框)。")
+      return(NULL) # 如果结构不符，返回NULL
+    }
+  })
+  all_outcome_dfs <- lapply(all_datasets, function(element) {
+    if (length(element) >= 2 && is.data.frame(element[[2]])) {
+      return(element[[2]]) # 返回结局数据框
+    } else {
+      warning("在合并数据时，发现一个元素的结构不符合预期 (缺少结局数据框)。")
+      return(NULL)
+    }
+  })
+
+  # 移除可能的NULL元素，然后使用 rbind 合并
+  all_exposure_dfs <- all_exposure_dfs[!sapply(all_exposure_dfs, is.null)]
+  all_outcome_dfs <- all_outcome_dfs[!sapply(all_outcome_dfs, is.null)]
+
+  combined_exposure_data <- if (length(all_exposure_dfs) > 0) do.call(rbind, all_exposure_dfs) else NULL
+  combined_outcome_data <- if (length(all_outcome_dfs) > 0) do.call(rbind, all_outcome_dfs) else NULL
+
+
+
+  # --- 5. 返回包含合并后的暴露和结局数据的列表 ---
+  return(list(exposure_data = combined_exposure_data, outcome_data = combined_outcome_data))
+}
+test <- generate_multiple_datasets_v4(
+  n = 10, # 要生成的总数据集数量
+  num_pleiotropic = 0,
+  n_expose_heterogeneity = 10,
+  N_exp = 1000, N_out = 1000,
+  p_f = 0.3, p_m = 0.3,
+  # --- 暴露效应 (当非零时的大小) ---
+  beta_FStoOE_exp = 0.1, beta_MStoOE_exp = 0.1,
+  beta_OStoOE_exp = 0.3,
+  # --- 暴露异质性 ---
+  h_beta_FStoOE_exp = 0, h_beta_MStoOE_exp = 0,
+  h_beta_OStoOE_exp = 0.1
+)
+
+
+lm(test$outcome_data$Father_expose ~ test$outcome_data$Father_SNPs)
 
 # %% 新升级的数据生成函数
 
@@ -2131,33 +2713,5 @@ generate_mr_trio_data_ultra_overlap <- function(
 
   return(results)
 }
-a <- generate_mr_trio_data_ultra_overlap(
-  n_snps = 3, n_pleiotropy = 1, n_null_snps = 10,
-  n_independent = 1000, p_trio = 0.5,
-  p_exp_out = 0.5, p_overlap = 1
-)
-a$data_trio_out$mother_snps.1 == a$data_trio_exp$mother_snps.1
-# %% 生成的数据合法么
-a <- generate_mr_trio_data_ultra_updata(
-  n_snps = 3, n_pleiotropy = 0,
-  n_independent = 5000, p_trio = 0.5,
-  p_exp_out = 0.5, p_overlap = 0,
-  p_f = 0.3, p_m = 0.3, # p_m 当前未在SNP生成中使用
-  # 暴露效应
-  beta_fs_oe_exp = 0.3, beta_ms_oe_exp = 0.3,
-  beta_os_oe_exp = 0.9,
-  # 结局效应 (直接多效性 / 遗传叠加效应)
-  beta_fs_oe_out = 0, beta_ms_oe_out = 0,
-  beta_os_oe_out = 0, p_negative_pleiotropy = 0,
-  # 因果效应
-  beta_exp_to_out = 0,
-  # 混杂效应
-  var_confounding_exp = 0.2, var_confounding_out = 0.2,
-  # 其他参数
-  r_correlation = 0.2, n_seed = NULL,
-  # 选型婚配强度(跨性状)
-  assortative_mating_strength = 0
-)
 
-cor(a$data_trio_out$mother_outcome, a$data_trio_out$mother_snps.1)
-summary(lm(a$data_trio_out$mother_outcome ~ a$data_trio_out$mother_snps.1))
+# %% 生成的数据合法么

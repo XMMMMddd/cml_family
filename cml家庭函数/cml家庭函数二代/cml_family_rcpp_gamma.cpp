@@ -50,7 +50,7 @@ arma::uvec union_uvec(const arma::uvec& a, const arma::uvec& b) {
     return arma::conv_to<arma::uvec>::from(result_vec);
 }
 
-//' Core iterative MLE algorithm implemented in C++
+//' Core iterative MLE algorithm implemented in C++ with variable selection history
 //' 
 //' @param gamma_hat Matrix of gamma estimates (2 x num_snps)
 //' @param beta_hat Matrix of beta estimates (2 x num_snps)
@@ -63,9 +63,9 @@ arma::uvec union_uvec(const arma::uvec& a, const arma::uvec& b) {
 //' @param max_iter Maximum number of iterations
 //' @param tol Convergence tolerance
 //' @param alpha_init Initial value for alpha
-//' @return List containing results of the iterative algorithm
+//' @return List containing results of the iterative algorithm with variable selection history
 // [[Rcpp::export]]
-List iterative_mle_core(
+List iterative_mle_core_with_history(
     arma::mat gamma_hat,
     arma::mat beta_hat,
     List Sigma_gamma_list,
@@ -86,6 +86,15 @@ List iterative_mle_core(
     bool converged = false;
     arma::vec alpha_history(max_iter, fill::zeros);
     arma::uvec set_A_indices, set_B_indices;
+    
+    // 新增：用于保存每次迭代的变量集历史
+    std::vector<arma::uvec> set_A_history;
+    std::vector<arma::uvec> set_B_history;
+    std::vector<arma::uvec> set_A_intersect_B_history;
+    std::vector<arma::uvec> set_A_diff_B_history;
+    std::vector<arma::uvec> set_B_diff_A_history;
+    std::vector<arma::vec> t_m_history;
+    std::vector<arma::vec> f_m_history;
     
     int iter;
     for (iter = 0; iter < max_iter; iter++) {
@@ -111,6 +120,10 @@ List iterative_mle_core(
             f_m(m) = pow(beta_hat(1, m) - alpha_current * gamma_current(1, m), 2) / var_beta_p(m);
         }
         
+        // 保存当前迭代的t_m和f_m值
+        t_m_history.push_back(t_m);
+        f_m_history.push_back(f_m);
+        
         // 获取排序后的索引
         arma::uvec t_m_sorted = sort_index(t_m);
         arma::uvec f_m_sorted = sort_index(f_m);
@@ -125,6 +138,13 @@ List iterative_mle_core(
         arma::uvec A_intersect_B = intersect_uvec(set_A_indices, set_B_indices);
         arma::uvec A_diff_B = setdiff_uvec(set_A_indices, set_B_indices);
         arma::uvec B_diff_A = setdiff_uvec(set_B_indices, set_A_indices);
+        
+        // 保存当前迭代的变量集
+        set_A_history.push_back(set_A_indices);
+        set_B_history.push_back(set_B_indices);
+        set_A_intersect_B_history.push_back(A_intersect_B);
+        set_A_diff_B_history.push_back(A_diff_B);
+        set_B_diff_A_history.push_back(B_diff_A);
         
         // ==========================================================
         // 步骤2: 更新gamma
@@ -252,13 +272,40 @@ List iterative_mle_core(
     // 清理alpha_history，只保留实际使用的部分
     arma::vec alpha_history_clean = alpha_history.head(iter);
     
+    // 将变量集历史转换为R格式（索引从1开始）
+    List set_A_history_R(iter);
+    List set_B_history_R(iter);
+    List set_A_intersect_B_history_R(iter);
+    List set_A_diff_B_history_R(iter);
+    List set_B_diff_A_history_R(iter);
+    List t_m_history_R(iter);
+    List f_m_history_R(iter);
+    
+    for (int i = 0; i < iter; i++) {
+        set_A_history_R[i] = set_A_history[i] + 1;
+        set_B_history_R[i] = set_B_history[i] + 1;
+        set_A_intersect_B_history_R[i] = set_A_intersect_B_history[i] + 1;
+        set_A_diff_B_history_R[i] = set_A_diff_B_history[i] + 1;
+        set_B_diff_A_history_R[i] = set_B_diff_A_history[i] + 1;
+        t_m_history_R[i] = t_m_history[i];
+        f_m_history_R[i] = f_m_history[i];
+    }
+    
     return List::create(
         Named("alpha_final") = alpha_current,
         Named("gamma_final") = gamma_current.t(),
         Named("iterations") = iter,
         Named("converged") = converged,
-        Named("set_A_indices") = set_A_indices + 1, // R索引从1开始
-        Named("set_B_indices") = set_B_indices + 1,
-        Named("alpha_history") = alpha_history_clean
+        Named("set_A_indices") = set_A_indices + 1, // 最终的集合A
+        Named("set_B_indices") = set_B_indices + 1, // 最终的集合B
+        Named("alpha_history") = alpha_history_clean,
+        // 新增的历史记录
+        Named("set_A_history") = set_A_history_R,
+        Named("set_B_history") = set_B_history_R,
+        Named("set_A_intersect_B_history") = set_A_intersect_B_history_R,
+        Named("set_A_diff_B_history") = set_A_diff_B_history_R,
+        Named("set_B_diff_A_history") = set_B_diff_A_history_R,
+        Named("t_m_history") = t_m_history_R,
+        Named("f_m_history") = f_m_history_R
     );
 }

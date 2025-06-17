@@ -94,13 +94,13 @@ perform_iterative_update <- function(
             beta_hat_exp_i <- beta_hat_exp[i, 1]
             beta_exp_i <- beta_exp[i, 1]
             beta_out_se <- matrix_big[matrix_indicator, 3]
-            t[i] <- (beta_hat_exp_i - alpha * beta_exp_i)^2 / beta_out_se
+            t[i] <- (beta_hat_out_i - alpha * beta_exp_i)^2 / beta_out_se
 
             # 计算关于父母的统计量
             beta_hat_exp_i <- beta_hat_exp[i, 2]
             beta_exp_i <- beta_exp[i, 2]
             beta_out_se <- matrix_big[matrix_indicator + 1, 4]
-            f[i] <- (beta_hat_exp_i - alpha * beta_exp_i)^2 / beta_out_se
+            f[i] <- (beta_hat_out_i - alpha * beta_exp_i)^2 / beta_out_se
         }
 
         a_snps_set <- arrange(data.frame(snps_id = 1:n_snps, statistic = t), t)
@@ -582,13 +582,13 @@ calculate_bic <- function(function_test_output,
     }
 
     # --- 3. 计算最终的BIC值 ---
-    bic <- l_complete + l_reduce + l_cc + log(min_n) * (a + b)
+    bic <- l_complete + l_reduce + l_cc +
+        1 / 4 * log(min_n / 2) * (a + b)
+    # bic <- l_complete + l_reduce + l_cc
 
     return(bic)
 }
 
-
-# %% bic 计算代码版
 
 
 
@@ -596,7 +596,7 @@ calculate_bic <- function(function_test_output,
 robust_cml_fit <- function(
     n_snps, beta_hat_exp, beta_hat_out,
     matrix_big, a_legal, b_legal,
-    max_iter = 100, tol = 1e-6, n_starts = 5, alpha_start_range = c(-0.5, 0.5),
+    max_iter = 100, tol = 1e-6, n_starts = 5, alpha_start_range = c(-0.00001, 0.00001),
     digits = 4) {
     results_list <- list()
 
@@ -749,9 +749,9 @@ cml_family_overlap_2_init <- function(
 # %% cml鲁棒性增强
 cml_family_overlap_2_robust <- function(
     n_snps, beta_hat_exp, beta_hat_out,
-    matrix_big,
+    matrix_big, min_n = 1000,
     max_iter = 100, tol = 1e-6, n_starts = 5,
-    alpha_start_range = c(-0.01, 0.01),
+    alpha_start_range = c(-0.0001, 0.00001),
     digits = 4) {
     # --- 1. 组合生成部分 (您的代码已经很高效) ---
     if (n_snps > 1) {
@@ -760,7 +760,7 @@ cml_family_overlap_2_robust <- function(
             # 如果 b_legal 可以等于 a_legal，那么您的 1:a 是正确的
             # 这里我假设 b 必须严格小于 a，如果不是，请改回 1:a
             if (a > 1) {
-                return(data.frame(a_legal = a, b_legal = 1:(a - 1)))
+                return(data.frame(a_legal = a, b_legal = 1:(a)))
             }
         })
         legal_pairs_table <- do.call(rbind, legal_pairs_list)
@@ -789,7 +789,6 @@ cml_family_overlap_2_robust <- function(
         b_legal_i <- legal_pairs_table$b_legal[i]
 
         # 增加进度条反馈
-        cat(sprintf("正在处理第 %d / %d 个组合: a=%d, b=%d\n", i, nrow(legal_pairs_table), a_legal_i, b_legal_i))
 
         # 【核心改动】使用 tryCatch 包裹所有可能出错的计算
         results_list[[i]] <- tryCatch(
@@ -807,6 +806,9 @@ cml_family_overlap_2_robust <- function(
                 a_reduce_b_set <- cml_fit_i$a_reduce_b_set
                 beta_exp_i <- cml_fit_i$beta_exp_updated
                 alpha_i <- cml_fit_i$alpha_new
+                if (abs(alpha_i) > 100) {
+                    alpha_i <- 0
+                }
 
                 alpha_se_i <- calculate_alpha_se_rcpp(
                     complete_set_i, a_reduce_b_set, matrix_big,
@@ -815,7 +817,7 @@ cml_family_overlap_2_robust <- function(
 
                 bic_i <- calculate_bic(
                     cml_fit_i, beta_hat_exp, beta_hat_out, matrix_big,
-                    min_n = 1000, a = n_snps - a_legal_i, b = n_snps - b_legal_i
+                    min_n = min_n, a = n_snps - a_legal_i, b = n_snps - b_legal_i
                 )
 
                 # 如果成功，返回一个包含所有结果的列表
@@ -823,7 +825,6 @@ cml_family_overlap_2_robust <- function(
             },
             error = function(e) {
                 # --- 如果发生任何错误，则执行此处的代码 ---
-                cat(sprintf("  -> 组合 (a=%d, b=%d) 计算失败。错误信息: %s\n", a_legal_i, b_legal_i, e$message))
                 # 返回包含 NA 的列表，以标记失败
                 return(list(alpha = NA, alpha_se = NA, bic = NA))
             }
@@ -881,3 +882,28 @@ cml_family_overlap_2_robust <- function(
         ))
     }
 }
+
+# %% cml单次模拟测试
+# n_snps <- 10
+# n_independent <- 3000
+# n_null_snps <- 20
+# phase_two_data_full <- generate_mr_trio_data_ultra_overlap(
+#     n_snps = n_snps, n_pleiotropy = 5, n_null_snps = n_null_snps,
+#     n_independent = n_independent, p_trio = 0.9,
+#     p_exp_out = 0.5, p_overlap = 0,
+#     p_f = 0.3, p_m = 0.3, # p_m 当前未在SNP生成中使用
+#     # 暴露效应
+#     beta_fs_oe_exp = 0.3 * 10, beta_ms_oe_exp = 0.3 * 10,
+#     beta_os_oe_exp = 0.3 * 10,
+#     # 结局效应 (直接多效性 / 遗传叠加效应)
+#     beta_fs_oe_out = 0.1 * 10, beta_ms_oe_out = 0.1 * 10,
+#     beta_os_oe_out = 0.1 * 10, p_negative_pleiotropy = 0,
+#     # 因果效应
+#     beta_exp_to_out = 0,
+#     # 混杂效应
+#     var_confounding_exp = 0.2, var_confounding_out = 0.2,
+#     # 其他参数
+#     r_correlation = 0.2, n_seed = NULL,
+#     # 选型婚配强度(跨性状)
+#     assortative_mating_strength = 1000
+# )

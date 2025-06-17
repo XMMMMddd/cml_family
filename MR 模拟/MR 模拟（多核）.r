@@ -29,38 +29,28 @@ simulation_cmlfamily_multsnps_cpp <- function(
         fun = function(sim_index, sim_params_list) {
             # 第一个参数 sim_index 接收迭代序号，但后面不用它
             # 调用内部模拟函数
-            triplet_family_simulation_once_overlap(
+            triplet_family_simulation_once_robust(
                 # --- 从列表解包参数 ---
-                n_snps = sim_params_list$n_snps,
-                n_pleiotropy = sim_params_list$n_pleiotropy,
-                n_null_snps = sim_params_list$n_null_snps,
-                n_independent = sim_params_list$n_independent,
-                p_trio = sim_params_list$p_trio,
-                p_exp_out = sim_params_list$p_exp_out,
-                p_overlap = sim_params_list$p_overlap,
-                p_f = sim_params_list$p_f,
-                p_m = sim_params_list$p_m, # p_m 当前未在SNP生成中使用
-                # 暴露效应
-                beta_fs_oe_exp = sim_params_list$beta_fs_oe_exp,
-                beta_ms_oe_exp = sim_params_list$beta_ms_oe_exp,
-                beta_os_oe_exp = sim_params_list$beta_os_oe_exp,
-                # 结局效应 (直接多效性 / 遗传叠加效应)
-                beta_fs_oe_out = sim_params_list$beta_fs_oe_out,
-                beta_ms_oe_out = sim_params_list$beta_ms_oe_out,
-                beta_os_oe_out = sim_params_list$beta_os_oe_out,
-                p_negative_pleiotropy =
-                    sim_params_list$p_negative_pleiotropy,
-                # 因果效应
+                n = sim_params_list$n, num_pleiotropic = sim_params_list$num_pleiotropic,
+                N_exp = sim_params_list$N_exp, N_out = sim_params_list$N_out,
+                overlap_prop = sim_params_list$overlap_prop, p_f = sim_params_list$p_f, p_m = sim_params_list$p_m,
+                beta_FStoOE_exp = sim_params_list$beta_FStoOE_exp,
+                beta_MStoOE_exp = sim_params_list$beta_MStoOE_exp,
+                beta_OStoOE_exp = sim_params_list$beta_OStoOE_exp,
+                mean_beta_FStoOE_out = sim_params_list$mean_beta_FStoOE_out,
+                sd_beta_FStoOE_out = sim_params_list$sd_beta_FStoOE_out,
+                mean_beta_MStoOE_out = sim_params_list$mean_beta_MStoOE_out,
+                sd_beta_MStoOE_out = sim_params_list$sd_beta_MStoOE_out,
+                mean_beta_OStoOE_out = sim_params_list$mean_beta_OStoOE_out,
+                sd_beta_OStoOE_out = sim_params_list$sd_beta_OStoOE_out,
+                prop_negative_pleiotropy = sim_params_list$prop_negative_pleiotropy,
+                assortative_mating_prob = sim_params_list$assortative_mating_prob,
+                assortative_mating_strength = sim_params_list$assortative_mating_strength,
+                crowd_stratification_differences = sim_params_list$crowd_stratification_differences,
                 beta_exp_to_out = sim_params_list$beta_exp_to_out,
-                # 混杂效应
-                var_confounding_exp = sim_params_list$var_confounding_exp,
-                var_confounding_out = sim_params_list$var_confounding_out,
-                # 其他参数
-                r_correlation = sim_params_list$r_correlation,
-                n_seed = sim_params_list$n_seed,
-                # 选型婚配强度(跨性状)
-                assortative_mating_strength =
-                    sim_params_list$assortative_mating_strength
+                beta_confounding_exp = sim_params_list$beta_confounding_exp,
+                beta_confounding_out = sim_params_list$beta_confounding_out,
+                correlation = sim_params_list$correlation, seed = NULL
             )
         },
         # --- 将 'param' 列表传递给匿名函数的 'sim_params_list' 参数 ---
@@ -134,32 +124,29 @@ simulation_ListtoTibble <- function(simulation_output_list) {
 
 # %% 小型模拟
 sim_params_list <- list( # --- 从列表解包参数 ---
-    n_snps = 3, n_pleiotropy = 0, n_null_snps = 10,
-    n_independent = 3000, p_trio = 0.5,
-    p_exp_out = 0.5, p_overlap = 1,
-    p_f = 0.3, p_m = 0.3, # p_m 当前未在SNP生成中使用
-    # 暴露效应
-    beta_fs_oe_exp = 0.5, beta_ms_oe_exp = 0.5,
-    beta_os_oe_exp = 0.5,
-    # 结局效应 (直接多效性 / 遗传叠加效应)
-    beta_fs_oe_out = 0, beta_ms_oe_out = 0,
-    beta_os_oe_out = 0, p_negative_pleiotropy = 0,
-    # 因果效应
-    beta_exp_to_out = 0,
-    # 混杂效应
-    var_confounding_exp = 0.2, var_confounding_out = 0.2,
-    # 其他参数
-    r_correlation = 0.2, n_seed = NULL,
-    # 选型婚配强度(跨性状)
-    assortative_mating_strength = 1000
+    n = 10,
+    num_pleiotropic = 0,
+    N_exp = 1000, N_out = 1000,
+    overlap_prop = 0, p_f = 0.3, p_m = 0.3,
+    beta_FStoOE_exp = 0.1, beta_MStoOE_exp = 0.1,
+    beta_OStoOE_exp = 0.3, mean_beta_FStoOE_out = 0.1,
+    sd_beta_FStoOE_out = 0.05, mean_beta_MStoOE_out = 0.1,
+    sd_beta_MStoOE_out = 0.05, mean_beta_OStoOE_out = 0.1,
+    sd_beta_OStoOE_out = 0.05, prop_negative_pleiotropy = 0.5,
+    assortative_mating_prob = 0, assortative_mating_strength = 0,
+    crowd_stratification_differences = 0, beta_exp_to_out = 0,
+    beta_confounding_exp = 0.2, beta_confounding_out = 0.2,
+    correlation = 0.2, seed = NULL
 )
-small_simulation <- simulation_cmlfamily_multsnps_cpp(1000, sim_params_list)
+small_simulation <- simulation_cmlfamily_multsnps_cpp(50, sim_params_list)
 
 small_simulation_tibble <- simulation_ListtoTibble(small_simulation)
 
-sum(small_simulation_tibble$tibble$c_p_value < 0.05) / 1000
-sum(small_simulation_tibble$tibble$b_p_value < 0.05, na.rm = TRUE) /
-    (1000 - sum(is.na(small_simulation_tibble$tibble$b_p_value)))
+# write.csv(small_simulation_tibble, "important_test.csv")
+# sum(small_simulation_tibble$tibble$c_p_value < 0.05) / 500
+# sum(small_simulation_tibble$tibble$b_p_value < 0.05, na.rm = TRUE) /
+#     (500 - sum(is.na(small_simulation_tibble$tibble$b_p_value)))
+
 # %% 大型模拟
 
 run_simulations_with_fancy_pb <- function(
@@ -301,3 +288,440 @@ test <- run_simulations_with_fancy_pb(
     n_simulations_per_combination = 500,
     csv_file_address, change_parameters, base_parameters
 )
+
+# %% 多核模拟
+# 多核并行版本的 triplet_family_simulation
+triplet_family_simulation_parallel <- function(
+    # 仿真参数
+    n_simulations = 100,
+    n_cores = NULL, # 核心数，NULL为自动检测
+    progress = TRUE, # 是否显示进度条
+    save_results = TRUE, # 是否保存详细结果
+    output_file = NULL, # 输出文件路径
+    seed_base = 12345, # 基础种子，每个仿真会有不同的种子
+    dependency_file = "MR 模拟/MR 模拟（单次）.R", # 依赖文件路径
+    # 原函数的所有参数
+    n = 10,
+    num_pleiotropic = 0,
+    N_exp = 1000, N_out = 1000,
+    overlap_prop = 0, p_f = 0.3, p_m = 0.3,
+    beta_FStoOE_exp = 0.3, beta_MStoOE_exp = 0.3,
+    beta_OStoOE_exp = 0.3, mean_beta_FStoOE_out = 0.1,
+    sd_beta_FStoOE_out = 0.05, mean_beta_MStoOE_out = 0.1,
+    sd_beta_MStoOE_out = 0.05, mean_beta_OStoOE_out = 0.1,
+    sd_beta_OStoOE_out = 0.05, prop_negative_pleiotropy = 0.5,
+    assortative_mating_prob = 0, assortative_mating_strength = 0,
+    crowd_stratification_differences = 0, beta_exp_to_out = 0,
+    beta_confounding_exp = 0.2, beta_confounding_out = 0.2,
+    correlation = 0.2) {
+    # ===== 加载必需的包 =====
+    required_packages <- c("parallel", "foreach", "doParallel")
+
+    for (pkg in required_packages) {
+        if (!requireNamespace(pkg, quietly = TRUE)) {
+            stop(paste("请安装必需的包:", pkg, "\n可以使用: install.packages('", pkg, "')", sep = ""))
+        }
+    }
+
+    # ===== 参数验证 =====
+    if (!is.numeric(n_simulations) || n_simulations <= 0 || n_simulations != floor(n_simulations)) {
+        stop("n_simulations 必须是正整数")
+    }
+
+    if (!is.null(n_cores)) {
+        if (!is.numeric(n_cores) || n_cores <= 0 || n_cores != floor(n_cores)) {
+            stop("n_cores 必须是正整数或NULL")
+        }
+    }
+
+    # ===== 设置并行环境 =====
+    # 检测可用核心数
+    max_cores <- parallel::detectCores()
+    if (is.null(n_cores)) {
+        n_cores <- max(1, max_cores - 1) # 保留一个核心给系统
+    } else {
+        n_cores <- min(n_cores, max_cores)
+    }
+
+    cat(paste("检测到", max_cores, "个CPU核心，将使用", n_cores, "个核心进行并行计算\n"))
+
+    # 检查是否有 triplet_family_simulation_once_robust 函数
+    if (!exists("triplet_family_simulation_once_robust", mode = "function")) {
+        stop("未找到 triplet_family_simulation_once_robust 函数，请先加载该函数")
+    }
+
+    # ===== 准备仿真参数 =====
+    # 为每个仿真生成不同的种子
+    seeds <- if (is.null(seed_base)) {
+        NULL
+    } else {
+        seed_base + 1:n_simulations
+    }
+
+    # 创建参数列表
+    simulation_params <- list(
+        n = n, num_pleiotropic = num_pleiotropic,
+        N_exp = N_exp, N_out = N_out,
+        overlap_prop = overlap_prop, p_f = p_f, p_m = p_m,
+        beta_FStoOE_exp = beta_FStoOE_exp, beta_MStoOE_exp = beta_MStoOE_exp,
+        beta_OStoOE_exp = beta_OStoOE_exp, mean_beta_FStoOE_out = mean_beta_FStoOE_out,
+        sd_beta_FStoOE_out = sd_beta_FStoOE_out, mean_beta_MStoOE_out = mean_beta_MStoOE_out,
+        sd_beta_MStoOE_out = sd_beta_MStoOE_out, mean_beta_OStoOE_out = mean_beta_OStoOE_out,
+        sd_beta_OStoOE_out = sd_beta_OStoOE_out, prop_negative_pleiotropy = prop_negative_pleiotropy,
+        assortative_mating_prob = assortative_mating_prob, assortative_mating_strength = assortative_mating_strength,
+        crowd_stratification_differences = crowd_stratification_differences, beta_exp_to_out = beta_exp_to_out,
+        beta_confounding_exp = beta_confounding_exp, beta_confounding_out = beta_confounding_out,
+        correlation = correlation
+    )
+
+    # ===== 定义单次仿真包装函数 =====
+    run_single_simulation <- function(sim_id, params, seed_val = NULL) {
+        tryCatch(
+            {
+                # 设置种子
+                if (!is.null(seed_val)) {
+                    params$seed <- seed_val
+                }
+
+                # 执行仿真 - 直接调用函数而不是do.call
+                result <- triplet_family_simulation_once_robust(
+                    n = params$n,
+                    num_pleiotropic = params$num_pleiotropic,
+                    N_exp = params$N_exp,
+                    N_out = params$N_out,
+                    overlap_prop = params$overlap_prop,
+                    p_f = params$p_f,
+                    p_m = params$p_m,
+                    beta_FStoOE_exp = params$beta_FStoOE_exp,
+                    beta_MStoOE_exp = params$beta_MStoOE_exp,
+                    beta_OStoOE_exp = params$beta_OStoOE_exp,
+                    mean_beta_FStoOE_out = params$mean_beta_FStoOE_out,
+                    sd_beta_FStoOE_out = params$sd_beta_FStoOE_out,
+                    mean_beta_MStoOE_out = params$mean_beta_MStoOE_out,
+                    sd_beta_MStoOE_out = params$sd_beta_MStoOE_out,
+                    mean_beta_OStoOE_out = params$mean_beta_OStoOE_out,
+                    sd_beta_OStoOE_out = params$sd_beta_OStoOE_out,
+                    prop_negative_pleiotropy = params$prop_negative_pleiotropy,
+                    assortative_mating_prob = params$assortative_mating_prob,
+                    assortative_mating_strength = params$assortative_mating_strength,
+                    crowd_stratification_differences = params$crowd_stratification_differences,
+                    beta_exp_to_out = params$beta_exp_to_out,
+                    beta_confounding_exp = params$beta_confounding_exp,
+                    beta_confounding_out = params$beta_confounding_out,
+                    correlation = params$correlation,
+                    seed = params$seed
+                )
+
+                # 添加仿真ID
+                result$simulation_id <- sim_id
+                result$seed_used <- seed_val
+                result$timestamp <- Sys.time()
+
+                return(result)
+            },
+            error = function(e) {
+                warning(paste("仿真", sim_id, "失败:", e$message))
+
+                # 返回失败结果
+                failed_result <- list(
+                    simulation_id = sim_id,
+                    seed_used = seed_val,
+                    timestamp = Sys.time(),
+                    error = e$message,
+                    # 初始化所有预期的字段为NA
+                    a_theta_point = NA, a_theta_se = NA, a_z = NA, a_p_value = NA, a_duration = NA,
+                    b_theta_point = NA, b_theta_se = NA, b_z = NA, b_p_value = NA, b_duration = NA,
+                    c_theta_point = NA, c_theta_se = NA, c_z = NA, c_p_value = NA, c_duration = NA,
+                    d_theta_point = NA, d_theta_se = NA, d_z = NA, d_p_value = NA, d_duration = NA,
+                    e_theta_point = NA, e_theta_se = NA, e_z = NA, e_p_value = NA, e_duration = NA,
+                    f_theta_point = NA, f_theta_se = NA, f_z = NA, f_p_value = NA, f_duration = NA,
+                    g_theta_point = NA, g_theta_se = NA, g_z = NA, g_p_value = NA, g_duration = NA,
+                    h_theta_point = NA, h_theta_se = NA, h_z = NA, h_p_value = NA, h_duration = NA,
+                    i_theta_point = NA, i_theta_se = NA, i_z = NA, i_p_value = NA, i_duration = NA
+                )
+
+                return(failed_result)
+            }
+        )
+    }
+
+    # ===== 执行并行仿真 =====
+    cat(paste("开始执行", n_simulations, "次仿真...\n"))
+    start_time <- Sys.time()
+
+    # 设置并行集群
+    if (n_cores > 1) {
+        cl <- parallel::makeCluster(n_cores)
+        doParallel::registerDoParallel(cl)
+
+        # 导出dependency_file变量到集群
+        parallel::clusterExport(cl, "dependency_file", envir = environment())
+
+        # 在每个核心上加载依赖和设置环境
+        parallel::clusterEvalQ(cl, {
+            # 加载依赖文件
+            source(dependency_file)
+
+            # 确保必要的包被加载
+            suppressWarnings({
+                library(methods) # 确保methods包可用
+                if (exists("library")) {
+                    try(library(MendelianRandomization), silent = TRUE)
+                    try(library(MASS), silent = TRUE)
+                }
+            })
+        })
+
+        # 检查关键全局变量是否存在，如果存在则导出到集群
+        global_vars_to_export <- c("n_independent", "p_trio", "n_snps", "overlap_cor")
+        existing_vars <- c()
+
+        for (var in global_vars_to_export) {
+            if (exists(var, envir = .GlobalEnv)) {
+                existing_vars <- c(existing_vars, var)
+            }
+        }
+
+        if (length(existing_vars) > 0) {
+            cat(paste("导出全局变量到集群:", paste(existing_vars, collapse = ", "), "\n"))
+            parallel::clusterExport(cl, existing_vars, envir = .GlobalEnv)
+        }
+
+        # 验证函数是否加载成功
+        cluster_check <- parallel::clusterEvalQ(cl, {
+            exists("triplet_family_simulation_once_robust", mode = "function")
+        })
+
+        if (!all(unlist(cluster_check))) {
+            parallel::stopCluster(cl)
+            stop("部分集群节点未能成功加载依赖文件，请检查文件路径是否正确")
+        }
+
+        cat("集群设置完成，所有节点已成功加载依赖\n")
+
+        tryCatch({
+            if (progress && requireNamespace("pbapply", quietly = TRUE)) {
+                # 使用 pbapply 显示进度条
+                results_list <- pbapply::pblapply(1:n_simulations, function(i) {
+                    run_single_simulation(i, simulation_params, if (is.null(seeds)) NULL else seeds[i])
+                }, cl = cl)
+            } else {
+                # 使用标准 parLapply
+                results_list <- parallel::parLapply(cl, 1:n_simulations, function(i) {
+                    run_single_simulation(i, simulation_params, if (is.null(seeds)) NULL else seeds[i])
+                })
+            }
+        }, finally = {
+            parallel::stopCluster(cl)
+        })
+    } else {
+        # 单核执行
+        if (progress && requireNamespace("pbapply", quietly = TRUE)) {
+            results_list <- pbapply::pblapply(1:n_simulations, function(i) {
+                run_single_simulation(i, simulation_params, if (is.null(seeds)) NULL else seeds[i])
+            })
+        } else {
+            results_list <- lapply(1:n_simulations, function(i) {
+                run_single_simulation(i, simulation_params, if (is.null(seeds)) NULL else seeds[i])
+                if (progress && i %% max(1, n_simulations %/% 20) == 0) {
+                    cat(paste("完成进度:", round(i / n_simulations * 100, 1), "%\n"))
+                }
+            })
+        }
+    }
+
+    end_time <- Sys.time()
+    total_duration <- as.numeric(end_time - start_time)
+
+    # ===== 处理结果 =====
+    cat("处理结果...\n")
+
+    # 统计成功和失败的仿真
+    successful_sims <- sum(sapply(results_list, function(x) is.null(x$error)))
+    failed_sims <- n_simulations - successful_sims
+
+    cat(paste("仿真完成! 总用时:", round(total_duration, 2), "秒\n"))
+    cat(paste("成功:", successful_sims, "次, 失败:", failed_sims, "次\n"))
+    cat(paste("成功率:", round(successful_sims / n_simulations * 100, 1), "%\n"))
+
+    # 转换为数据框
+    if (save_results) {
+        # 提取所有字段名
+        all_fields <- unique(unlist(lapply(results_list, names)))
+
+        # 创建数据框
+        results_df <- data.frame(
+            simulation_id = sapply(results_list, function(x) x$simulation_id %||% NA),
+            stringsAsFactors = FALSE
+        )
+
+        # 添加所有其他字段
+        for (field in setdiff(all_fields, "simulation_id")) {
+            results_df[[field]] <- sapply(results_list, function(x) x[[field]] %||% NA)
+        }
+    } else {
+        results_df <- NULL
+    }
+
+    # ===== 汇总统计 =====
+   # ===== 汇总统计 =====
+method_names <- c("a", "b", "c", "d", "e", "f", "g", "h", "i")
+summary_stats <- list()
+
+# 使用仿真参数中的真实因果效应值
+true_theta <- beta_exp_to_out
+
+for (method in method_names) {
+    theta_values <- sapply(results_list, function(x) x[[paste0(method, "_theta_point")]])
+    se_values <- sapply(results_list, function(x) x[[paste0(method, "_theta_se")]])
+    p_values <- sapply(results_list, function(x) x[[paste0(method, "_p_value")]])
+    
+    # 移除NA值
+    valid_indices <- !is.na(theta_values) & !is.na(se_values)
+    valid_theta <- theta_values[valid_indices]
+    valid_se <- se_values[valid_indices]
+    valid_p <- p_values[!is.na(p_values)]
+    
+    if (length(valid_theta) > 0) {
+        # 计算95%置信区间的覆盖率
+        ci_lower_95 <- valid_theta - 1.96 * valid_se
+        ci_upper_95 <- valid_theta + 1.96 * valid_se
+        coverage_95 <- mean(ci_lower_95 <= true_theta & true_theta <= ci_upper_95)
+        
+        # 计算99%置信区间的覆盖率
+        ci_lower_99 <- valid_theta - 2.576 * valid_se
+        ci_upper_99 <- valid_theta + 2.576 * valid_se
+        coverage_99 <- mean(ci_lower_99 <= true_theta & true_theta <= ci_upper_99)
+        
+        summary_stats[[method]] <- list(
+            n_valid = length(valid_theta),
+            mean_theta = mean(valid_theta),
+            sd_theta = sd(valid_theta),
+            median_theta = median(valid_theta),
+            power_005 = if (length(valid_p) > 0) mean(valid_p < 0.05) else NA,
+            power_001 = if (length(valid_p) > 0) mean(valid_p < 0.01) else NA,
+            coverage_95 = coverage_95,
+            coverage_99 = coverage_99,
+            # 额外统计信息
+            mean_se = mean(valid_se),
+            bias = mean(valid_theta) - true_theta,
+            mse = mean((valid_theta - true_theta)^2),  # 均方误差
+            rmse = sqrt(mean((valid_theta - true_theta)^2))  # 均方根误差
+        )
+    } else {
+        summary_stats[[method]] <- list(
+            n_valid = 0,
+            mean_theta = NA,
+            sd_theta = NA,
+            median_theta = NA,
+            power_005 = NA,
+            power_001 = NA,
+            coverage_95 = NA,
+            coverage_99 = NA,
+            mean_se = NA,
+            bias = NA,
+            mse = NA,
+            rmse = NA
+        )
+    }
+}
+
+    # ===== 保存结果 =====
+    if (!is.null(output_file) && save_results) {
+        tryCatch(
+            {
+                if (grepl("\\.rds$", output_file)) {
+                    saveRDS(list(results = results_df, summary = summary_stats), output_file)
+                } else if (grepl("\\.csv$", output_file)) {
+                    write.csv(results_df, output_file, row.names = FALSE)
+                } else {
+                    save(results_df, summary_stats, file = output_file)
+                }
+                cat(paste("结果已保存到:", output_file, "\n"))
+            },
+            error = function(e) {
+                warning(paste("保存文件失败:", e$message))
+            }
+        )
+    }
+
+    # ===== 返回结果 =====
+    final_result <- list(
+        summary_statistics = summary_stats,
+        simulation_info = list(
+            n_simulations = n_simulations,
+            successful_simulations = successful_sims,
+            failed_simulations = failed_sims,
+            success_rate = successful_sims / n_simulations,
+            total_duration_seconds = total_duration,
+            n_cores_used = n_cores,
+            parameters_used = simulation_params
+        )
+    )
+
+    if (save_results) {
+        final_result$detailed_results <- results_df
+        final_result$raw_results <- results_list
+    }
+
+    return(final_result)
+}
+
+
+# 用于处理NULL值的操作符
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+
+# 提供一个简化的接口
+run_mr_simulation <- function(n_simulations = 100, n_cores = NULL, ...) {
+    triplet_family_simulation_parallel(
+        n_simulations = n_simulations,
+        n_cores = n_cores,
+        ...
+    )
+}
+
+# ===== 使用示例 =====
+if (FALSE) { # 防止意外执行
+    # 基本用法
+    results <- triplet_family_simulation_parallel(
+        n_simulations = 1000,
+        n_cores = 10,
+        n = 10,
+        output_file = NULL, # 输出文件路径
+        num_pleiotropic = 0,
+        N_exp = 3000,
+        N_out = 3000,
+        overlap_prop = 0,
+        p_f = 0.3, p_m = 0.3,
+        beta_FStoOE_exp = 0.3,
+        beta_MStoOE_exp = 0.3,
+        beta_OStoOE_exp = 0.,
+        mean_beta_FStoOE_out = 0.1,
+        sd_beta_FStoOE_out = 0.05,
+        mean_beta_MStoOE_out = 0.1,
+        sd_beta_MStoOE_out = 0.05,
+        mean_beta_OStoOE_out = 0.1,
+        sd_beta_OStoOE_out = 0.05,
+        prop_negative_pleiotropy = 0.5,
+        assortative_mating_prob = 0,
+        assortative_mating_strength = 0,
+        crowd_stratification_differences = 0,
+        beta_exp_to_out = 0.02,
+        beta_confounding_exp = 0.2,
+        beta_confounding_out = 0.2,
+        correlation = 0.2, seed = NULL
+    )
+
+    # 查看汇总结果
+    print(results$summary_statistics)
+
+    # 快速启动
+    results2 <- run_mr_simulation(
+        n_simulations = 50,
+        n = 15,
+        beta_exp_to_out = 0.1
+    )
+}
+
+results$detailed_results

@@ -14,8 +14,7 @@ print(paste("成功加载 Rcpp 函数从:", cpp_file_path))
 
 
 # %% 旧的R函数和其他辅助函数 (来自用户之前的文件内容)
-source("FGWAS 优化版本/FGWAS 函数.R") # 假设此文件包含 perform_fgwas_analysis
-source("样本生成函数/三联体家庭结构生成函数.R") # 假设此文件包含 generate_mr_trio_data_ultra_updata
+
 # 对角阵处理算法
 create_combined_diagonal_matrices <- function(
     beta_sigma_exp,
@@ -696,84 +695,84 @@ bic <- (1 + 2 * n_snps + 2 * k) + l_k
 
 # %% 测试方差函数print("--- 开始脚本执行 ---")
 
-n_snps_example <- 5
-print(paste("示例 SNP 数量 (n_snps_example):", n_snps_example))
+# n_snps_example <- 5
+# print(paste("示例 SNP 数量 (n_snps_example):", n_snps_example))
 
-if (exists("generate_mr_trio_data_ultra_updata") && is.function(generate_mr_trio_data_ultra_updata)) {
-    data_set_example <- generate_mr_trio_data_ultra_updata(beta_os_oe_exp = 0.5, n_snps = n_snps_example)
-} else {
-    stop("函数 'generate_mr_trio_data_ultra_updata' 未定义。")
-}
+# if (exists("generate_mr_trio_data_ultra_updata") && is.function(generate_mr_trio_data_ultra_updata)) {
+#     data_set_example <- generate_mr_trio_data_ultra_updata(beta_os_oe_exp = 0.5, n_snps = n_snps_example)
+# } else {
+#     stop("函数 'generate_mr_trio_data_ultra_updata' 未定义。")
+# }
 
-if (exists("perform_fgwas_analysis") && is.function(perform_fgwas_analysis)) {
-    data_set_fgwas_example <- perform_fgwas_analysis(data_set_example, n_snps = n_snps_example)
-} else {
-    stop("函数 'perform_fgwas_analysis' 未定义。")
-}
+# if (exists("perform_fgwas_analysis") && is.function(perform_fgwas_analysis)) {
+#     data_set_fgwas_example <- perform_fgwas_analysis(data_set_example, n_snps = n_snps_example)
+# } else {
+#     stop("函数 'perform_fgwas_analysis' 未定义。")
+# }
 
-beta_sigma_exp_ex <- as.matrix(data_set_fgwas_example$beta_sigma_exp)
-beta_sigma_out_ex <- as.matrix(data_set_fgwas_example$beta_sigma_out)
-beta_hat_exp_ex <- as.matrix(data_set_fgwas_example$beta_hat_exp)
-beta_hat_out_ex <- as.matrix(data_set_fgwas_example$beta_hat_out)
-k_ex <- 0
+# beta_sigma_exp_ex <- as.matrix(data_set_fgwas_example$beta_sigma_exp)
+# beta_sigma_out_ex <- as.matrix(data_set_fgwas_example$beta_sigma_out)
+# beta_hat_exp_ex <- as.matrix(data_set_fgwas_example$beta_hat_exp)
+# beta_hat_out_ex <- as.matrix(data_set_fgwas_example$beta_hat_out)
+# k_ex <- 0
 
-beta_sigma_t_exp_ex <- invert_beta_sigma_out_matrices(beta_sigma_exp_ex)
-beta_sigma_t_out_ex <- invert_beta_sigma_out_matrices(beta_sigma_out_ex)
-matrix_big_ex <- create_combined_diagonal_matrices(
-    beta_sigma_t_exp_ex,
-    beta_sigma_t_out_ex,
-    off_diagonal_elements = NULL
-)
-print("示例数据准备完毕。")
-
-default_r_ex <- matrix(0, nrow = n_snps_example, ncol = 2)
-
-# # 构造起点列表，分解复杂行 (现在由函数内部自动生成)
-# start_point_1 <- list(alpha = 0.0, beta_exp = NULL, r = NULL)
-# start_point_2 <- list(alpha = 0.2, beta_exp = NULL, r = NULL)
-# start_point_3 <- list(alpha = -0.2, beta_exp = NULL, r = NULL)
-#
-# perturbed_beta_exp_val <- beta_hat_exp_ex + matrix(rnorm(n_snps_example * 2, 0, 0.01), nrow = n_snps_example, ncol = 2)
-# perturbed_r_val <- default_r_ex + matrix(rnorm(n_snps_example * 2, 0, 0.01), nrow = n_snps_example, ncol = 2)
-# start_point_4 <- list(alpha = 0.5, beta_exp = perturbed_beta_exp_val, r = perturbed_r_val)
-#
-# start_point_5 <- list(alpha = -0.5, beta_exp = NULL, r = NULL)
-#
-# start_points_example <- list(
-# start_point_1,
-# start_point_2,
-# start_point_3,
-# start_point_4,
-# start_point_5
+# beta_sigma_t_exp_ex <- invert_beta_sigma_out_matrices(beta_sigma_exp_ex)
+# beta_sigma_t_out_ex <- invert_beta_sigma_out_matrices(beta_sigma_out_ex)
+# matrix_big_ex <- create_combined_diagonal_matrices(
+#     beta_sigma_t_exp_ex,
+#     beta_sigma_t_out_ex,
+#     off_diagonal_elements = NULL
 # )
-# print(paste("定义了", length(start_points_example), "个多起点。")) # 不再需要手动定义
+# print("示例数据准备完毕。")
 
-print("--- 调用多起点 Rcpp 迭代函数 (自动生成起点) ---")
-if (exists("iterative_algorithm_rcpp") && is.function(iterative_algorithm_rcpp) && !identical(body(iterative_algorithm_rcpp), body(function(...) {
-    stop("Rcpp 函数 iterative_algorithm_rcpp未能成功加载。请检查路径和编译。")
-}))) {
-    multi_start_results <- multi_start_iterative_algorithm_rcpp(
-        matrix_big = matrix_big_ex,
-        beta_sigma_exp = beta_sigma_exp_ex,
-        beta_sigma_out = beta_sigma_out_ex,
-        beta_hat_exp = beta_hat_exp_ex,
-        beta_hat_out = beta_hat_out_ex,
-        k = k_ex,
-        num_starts = 5, # 指定自动生成5个起点
-        max_iter = 200,
-        tolerance = 1e-7,
-        alpha_group_tolerance = 1e-5,
-        min_converged_fraction = 0.6
-    )
+# default_r_ex <- matrix(0, nrow = n_snps_example, ncol = 2)
 
-    print("--- 多起点迭代结果 (自动生成起点) ---")
-    print(paste("整体是否成功:", multi_start_results$overall_success))
-    if (multi_start_results$overall_success) {
-        print(paste("共识 Alpha:", multi_start_results$consensus_alpha))
-    }
-    print(paste("收敛到共识点的起点数量:", multi_start_results$num_successful_starts, "总起点数:", multi_start_results$total_starts))
-} else {
-    print("Rcpp 函数 iterative_algorithm_rcpp 未能加载，跳过多起点 Rcpp 测试。")
-}
+# # # 构造起点列表，分解复杂行 (现在由函数内部自动生成)
+# # start_point_1 <- list(alpha = 0.0, beta_exp = NULL, r = NULL)
+# # start_point_2 <- list(alpha = 0.2, beta_exp = NULL, r = NULL)
+# # start_point_3 <- list(alpha = -0.2, beta_exp = NULL, r = NULL)
+# #
+# # perturbed_beta_exp_val <- beta_hat_exp_ex + matrix(rnorm(n_snps_example * 2, 0, 0.01), nrow = n_snps_example, ncol = 2)
+# # perturbed_r_val <- default_r_ex + matrix(rnorm(n_snps_example * 2, 0, 0.01), nrow = n_snps_example, ncol = 2)
+# # start_point_4 <- list(alpha = 0.5, beta_exp = perturbed_beta_exp_val, r = perturbed_r_val)
+# #
+# # start_point_5 <- list(alpha = -0.5, beta_exp = NULL, r = NULL)
+# #
+# # start_points_example <- list(
+# # start_point_1,
+# # start_point_2,
+# # start_point_3,
+# # start_point_4,
+# # start_point_5
+# # )
+# # print(paste("定义了", length(start_points_example), "个多起点。")) # 不再需要手动定义
 
-print("--- 脚本执行完毕 ---")
+# print("--- 调用多起点 Rcpp 迭代函数 (自动生成起点) ---")
+# if (exists("iterative_algorithm_rcpp") && is.function(iterative_algorithm_rcpp) && !identical(body(iterative_algorithm_rcpp), body(function(...) {
+#     stop("Rcpp 函数 iterative_algorithm_rcpp未能成功加载。请检查路径和编译。")
+# }))) {
+#     multi_start_results <- multi_start_iterative_algorithm_rcpp(
+#         matrix_big = matrix_big_ex,
+#         beta_sigma_exp = beta_sigma_exp_ex,
+#         beta_sigma_out = beta_sigma_out_ex,
+#         beta_hat_exp = beta_hat_exp_ex,
+#         beta_hat_out = beta_hat_out_ex,
+#         k = k_ex,
+#         num_starts = 5, # 指定自动生成5个起点
+#         max_iter = 200,
+#         tolerance = 1e-7,
+#         alpha_group_tolerance = 1e-5,
+#         min_converged_fraction = 0.6
+#     )
+
+#     print("--- 多起点迭代结果 (自动生成起点) ---")
+#     print(paste("整体是否成功:", multi_start_results$overall_success))
+#     if (multi_start_results$overall_success) {
+#         print(paste("共识 Alpha:", multi_start_results$consensus_alpha))
+#     }
+#     print(paste("收敛到共识点的起点数量:", multi_start_results$num_successful_starts, "总起点数:", multi_start_results$total_starts))
+# } else {
+#     print("Rcpp 函数 iterative_algorithm_rcpp 未能加载，跳过多起点 Rcpp 测试。")
+# }
+
+# print("--- 脚本执行完毕 ---")

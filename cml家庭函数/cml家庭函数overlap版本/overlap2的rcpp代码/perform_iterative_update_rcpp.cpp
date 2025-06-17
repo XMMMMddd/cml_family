@@ -57,16 +57,16 @@ List perform_iterative_update_rcpp(int n_snps,
             int matrix_indicator = 4 * (i + 1) - 1 - 1; // Convert to 0-based indexing
             
             // Calculate statistics for offspring
-            double beta_hat_exp_i = beta_hat_exp(i, 0);
+            double beta_hat_out_i = beta_hat_out(i, 0);
             double beta_exp_i = beta_exp(i, 0);
             double beta_out_se = matrix_big(matrix_indicator, 2); // 0-based indexing
-            t(i) = pow(beta_hat_exp_i - alpha * beta_exp_i, 2) / beta_out_se;
+            t(i) = pow(beta_hat_out_i - alpha * beta_exp_i, 2) / beta_out_se;
             
             // Calculate statistics for parents
-            beta_hat_exp_i = beta_hat_exp(i, 1);
+            beta_hat_out_i = beta_hat_out(i, 1);
             beta_exp_i = beta_exp(i, 1);
             beta_out_se = matrix_big(matrix_indicator + 1, 3); // 0-based indexing
-            f(i) = pow(beta_hat_exp_i - alpha * beta_exp_i, 2) / beta_out_se;
+            f(i) = pow(beta_hat_out_i - alpha * beta_exp_i, 2) / beta_out_se;
         }
         
         // Create sorted indices for SNPs based on statistics
