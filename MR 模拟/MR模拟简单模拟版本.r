@@ -1,57 +1,112 @@
 # %%
 # 多核模拟函数
-
 library(parallel)
 library(doParallel)
 library(foreach)
-#' @title 并行运行三重体家族MR模拟 (已修复)
+# 载入必要的R包
+# 请确保已经安装了这些包: install.packages(c("parallel", "dplyr"))
+library(parallel)
+library(dplyr)
+
+#' @title (已更新) 并行运行三重奏家庭孟德尔随机化模拟
 #'
-#' @param n_simulations 要运行的总模拟次数。
-#' @param n_cores 要使用的CPU核心数。
-#' @param script_path 包含 `triplet_family_simulation_once_robust` 函数的 R 脚本的路径。
-#' @param seed 用于可重复性研究的随机数种子。
-#' @param ... 其他要传递给 `triplet_family_simulation_once_robust` 函数的参数。
+#' @description
+#' 该函数使用并行处理来多次运行模拟。它通过在每个核心加载一个指定的 R 脚本文件
+#' 来获取所需的函数。此版本更易于维护。
 #'
-#' @return 一个数据框，每一行代表一次模拟的结果。
+#' @param n_simulations 要运行的模拟总次数。
+#' @param source_file 一个字符串，表示包含所有必需函数（如
+#'   'triplet_family_simulation_once_robust' 及其依赖项）的 R 脚本文件的路径。
+#' @param ... 其他所有要传递给 'triplet_family_simulation_once_robust' 函数的参数。
+#' @param n_cores 要使用的CPU核心数。默认为 `detectCores() - 1`。
 #'
-run_simulation_in_parallel <- function(n_simulations,
-                                       n_cores,
-                                       script_path = "MR 模拟/MR 模拟（单次）.R",
-                                       seed = 123,
-                                       ...) {
-    message(paste("正在启动", n_cores, "个核心..."))
+#' @return 一个数据框 (tibble)，其格式与 'calculate_simulation_summary' 兼容。
+#'
+run_simulation_parallel <- function(n_simulations, source_file, ..., n_cores = NULL) {
+    # 1. 检查源文件是否存在
+    if (!file.exists(source_file)) {
+        stop("指定的源文件不存在: ", source_file)
+    }
+
+    # 2. 设置并行环境
+    if (is.null(n_cores)) {
+        n_cores <- detectCores() - 1
+        cat("未指定核心数，将使用 ", n_cores, " 个核心。\n")
+    }
     cl <- makeCluster(n_cores)
-    on.exit(stopCluster(cl))
+    cat("并行集群已启动...\n")
 
-    clusterSetRNGStream(cl, seed)
+    # 3. 将必要的对象和库导出到每个核心
+    tryCatch(
+        {
+            # 为确保路径的稳健性，获取文件的绝对路径
+            absolute_path_to_source <- normalizePath(source_file)
 
-    # -------------------- 新增的修复代码在这里 --------------------
-    # 将 'script_path' 变量从当前环境导出到所有核心
-    clusterExport(cl, "script_path", envir = environment())
-    # -----------------------------------------------------------
+            # 将“绝对路径”这个变量本身导出到每个核心
+            clusterExport(cl, "absolute_path_to_source", envir = environment())
 
-    message(paste("正在为每个核心加载脚本:", script_path))
-    clusterEvalQ(cl, {
-        # 现在每个核心都知道 'script_path' 是什么了
-        library(dplyr)
-        library(MendelianRandomization)
-        source(script_path)
+            # 现在，让每个核心使用这个绝对路径来 source 文件，并加载库
+            clusterEvalQ(cl, {
+                # source() 命令现在在每个核心上运行
+                source(absolute_path_to_source)
+                # 同样加载所需的库
+                library(MendelianRandomization)
+            })
+            cat("源文件 '", basename(absolute_path_to_source), "' 和所需库已在每个核心加载。\n", sep = "")
+        },
+        error = function(e) {
+            stopCluster(cl)
+            stop("在并行核心上加载源文件时发生错误: ", e$message)
+        }
+    )
+
+    # 4. 为每次模拟生成独立的随机种子
+    set.seed(Sys.time())
+    seeds <- sample.int(1e9, n_simulations)
+
+    # 5. 捕获要传递给模拟函数的通用参数
+    sim_args <- list(...)
+
+    # 6. 使用 parLapply 在多核上执行模拟
+    cat("开始并行运行 ", n_simulations, " 次模拟...\n")
+    results_list <- parLapply(cl, 1:n_simulations, function(i) {
+        current_args <- c(sim_args, list(seed = seeds[i]))
+        tryCatch(
+            {
+                do.call(triplet_family_simulation_once_robust, current_args)
+            },
+            error = function(e) {
+                list(simulation_error = as.character(e))
+            }
+        )
     })
+    cat("所有模拟运行完成。\n")
 
-    message(paste("正在", n_cores, "个核心上运行", n_simulations, "次模拟..."))
-    start_time <- Sys.time()
+    # 7. 关闭并行集群
+    stopCluster(cl)
+    cat("并行集群已关闭。\n")
 
-    results_list <- parLapply(cl, 1:n_simulations, function(i, ...) {
-        triplet_family_simulation_once_robust(...)
-    }, ...)
+    # 8. 处理并整合结果 (此部分逻辑与之前完全相同)
+    cat("正在处理和整合结果...\n")
+    simulation_results_df <- bind_rows(results_list)
 
-    end_time <- Sys.time()
-    message(paste("所有模拟完成。总耗时:", round(difftime(end_time, start_time, units = "mins"), 2), "分钟。"))
+    methods <- c("a", "b", "c", "d", "e", "f", "g", "h", "i")
+    for (method in methods) {
+        theta_col <- paste0(method, "_theta_point")
+        error_col <- paste0(method, "_error")
+        if (theta_col %in% names(simulation_results_df)) {
+            simulation_results_df[[error_col]] <- ifelse(
+                is.na(simulation_results_df[[theta_col]]),
+                "Error: Result was NA",
+                NA_character_
+            )
+        } else {
+            simulation_results_df[[error_col]] <- "Error: Result column not found"
+        }
+    }
 
-    message("正在合并结果...")
-    results_df <- dplyr::bind_rows(results_list)
-    results_df$simulation_id <- 1:nrow(results_df)
-    return(results_df)
+    cat("结果处理完成，返回数据框。\n")
+    return(simulation_results_df)
 }
 calculate_simulation_summary <- function(simulation_results, true_theta) {
     # 定义方法名称
@@ -136,44 +191,42 @@ calculate_simulation_summary <- function(simulation_results, true_theta) {
 
     return(summary_stats)
 }
-# %% 运行
-a <- run_simulation_in_parallel(
-    n_simulations = 1000, n_cores = 11,
-    script_path = "MR 模拟/MR 模拟（单次）.R",
-    n = 10, # 要生成的总数据集数量
-    num_pleiotropic = 0,
-    n_expose_heterogeneity = 3,
-    N_exp = 1000, N_out = 1000,
-    p_f = 0.3, p_m = 0.3,
-    # --- 暴露效应 (当非零时的大小) ---
-    beta_FStoOE_exp = 0, beta_MStoOE_exp = 0,
-    beta_OStoOE_exp = 0.3,
-    # --- 暴露异质性 ---
-    h_beta_FStoOE_exp = 0.5, h_beta_MStoOE_exp = 0.5,
-    h_beta_OStoOE_exp = 0.3,
-    # --- 结局效应 / 水平多效性 (当非零时的分布参数) ---
-    # 子代基因型 -> 结局 (遗传叠加效应或基因多效性)
-    mean_beta_FStoOE_out = 0.1, sd_beta_FStoOE_out = 0,
-    mean_beta_MStoOE_out = 0.1, sd_beta_MStoOE_out = 0,
-    # 父母基因型 -> 结局 (应为子代自身SNP对结局的效应，即基因多效性; 参数名可能需对应调整)
-    mean_beta_OStoOE_out = 0, sd_beta_OStoOE_out = 0,
-    prop_negative_pleiotropy = 0, # 在指定为多效性的SNP中，其效应为负的比例 (0 到 1)
-    # 选型婚配
-    assortative_mating_prob = 0,
-    assortative_mating_strength = 1000, # 选型婚配对结局的影响因子
-    # 人群分层
-    ## 定义人群分层的差异(次等位基因频率差异)
-    crowd_stratification_differences = 0, # 用于模拟两个具有不同等位基因频率的亚群
-    # --- 其他效应 ---
-    beta_exp_to_out = 0.02, # 暴露对结局的真实因果效应
-    beta_confounding_exp = 0.2, # 影响暴露的混杂因素的方差 (效应大小为1)
-    beta_confounding_out = 0.2, # 影响结局的混杂因素的方差 (效应大小为1)
-    correlation = 0.2, # 共享环境因素的方差
-    seed = NULL
-)
 
-b <- calculate_simulation_summary(a, true_theta = 0.02)
-b$g
+
+# %% 运行
+a <- run_simulation_parallel(
+    n_simulations = 1000,
+    source_file = "MR 模拟/MR 模拟（单次）.R",
+    n = 1000,
+    n_snps = 5,
+    n_pleiotropic = 0,
+    n_expose_heterogeneity = 0,
+    p_f = 0.3,
+    p_m = 0.3,
+    beta_fs_to_oe_exp = 0.3,
+    beta_ms_to_oe_exp = 0.3,
+    beta_os_to_oe_exp = 0.3,
+    h_beta_fs_to_oe_exp = 0.2,
+    h_beta_ms_to_oe_exp = 0.1,
+    h_beta_os_to_oe_exp = 0.3,
+    mean_beta_fs_to_oe_out = 0.1,
+    sd_beta_fs_to_oe_out = 0.05,
+    mean_beta_ms_to_oe_out = 0.1,
+    sd_beta_ms_to_oe_out = 0.05,
+    mean_beta_os_to_oe_out = 0.1,
+    sd_beta_os_to_oe_out = 0.05,
+    p_neg_pleiotropy = 0.5,
+    assortative_mating_strength = 0,
+    crowd_differences = 0,
+    beta_exp_to_out = 0,
+    confounding_exp = 0.2,
+    confounding_out = 0.2,
+    correlation = 0.2
+)
+a$e_p_value
+b <- calculate_simulation_summary(a, true_theta = 0)
+b$b
+b$c
 saveRDS(a, "MR简单模拟结果/都是好的真值为0.rds")
 # a <- readRDS("MR简单模拟结果/都是好的SNPs真值为0.02.rds")
 # b <- calculate_simulation_summary(a, true_theta = 0.02)

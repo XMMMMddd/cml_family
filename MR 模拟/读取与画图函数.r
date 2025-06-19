@@ -1255,7 +1255,7 @@ bias_plot
 ggsave(a, "MR简单模拟结果/图包/")
 power_plot <- plot_power(b,
     label_size = 3, method_names = method_names,
-    power_type = "005", plot_type = "power", show_legend = FALSE
+    power_type = "005", plot_type = "type1error", show_legend = FALSE
 )
 
 ggsave("MR简单模拟结果/图包/都是好的SNPs真值为0.02.svg",
@@ -1270,11 +1270,12 @@ coverage_plot <- plot_coverage(b,
     acceptable_range = c(0.9365, 0.9635)
 )
 coverage_plot
+a$simulation_id <- 1:1000
 d <- plot_estimates_boxplot(a,
     method_names = method_names,
-    true_value = 0.02
+    true_value = 0
 )
-
+a
 ggsave("MR简单模拟结果/图包/都是好的SNPs真值为0.02（箱线图）.svg",
     plot = d$plot,
     width = 8, height = 6,

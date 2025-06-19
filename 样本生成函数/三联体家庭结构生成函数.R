@@ -1,3 +1,4 @@
+# %% 载入要用到的包
 library(dplyr)
 library(MASS)
 
@@ -586,7 +587,7 @@ if (FALSE) {
 
 load_mr_trio_params <- function() {
   # 基本参数
-  n <<- 1000
+  n <- 1000
   n_snps <<- 10
   p_f <<- 0.3
   p_m <<- 0.3
@@ -660,7 +661,7 @@ load_mr_trio_params <- function() {
 
   cat("所有MR Trio参数已加载到全局环境\n")
 }
-load_mr_trio_params()
+# load_mr_trio_params()
 generate_snp_hwe_matrix <- function(n_samples, maf, n_snps = NULL) {
   # 参数验证和处理
   if (is.null(n_snps)) {
@@ -825,7 +826,7 @@ generate_mr_trio_data_matrix <- function(
     n_snps
   )
   beta_ms_to_oe_out_matrix <- parameter_processing_function(
-    beta_ms_to_oe_exp,
+    beta_ms_to_oe_out,
     n_snps
   )
   # ! 复杂与关联
@@ -1186,14 +1187,16 @@ generate_mr_trio_data_matrix <- function(
     offspring_outcome = offspring_outcome
   )
 
-  return(
-    data = data
-  )
+  return(data)
 }
 if (FALSE) {
   beta_ms_to_oe_exp <- matrix(0, nrow = 10, ncol = 1)
-  test1 <- generate_mr_trio_data_matrix(beta_ms_to_oe_exp = beta_ms_to_oe_exp)
+  test1 <- generate_mr_trio_data_matrix( beta_fs_to_oe_exp = rep(0.5), beta_ms_to_oe_exp = 0.5, beta_os_to_oe_exp = 0.5)
   str(test1)
+  lm(test1$father_expose ~ test1$father_snps.SNP_2)
+  test_1 <- generate_mr_trio_data_matrix_ultra()
+
+  fgwas_for_data_matrix(test_1[[1]])
 }
 generate_mr_trio_data_matrix_ultra <- function(
     n = 1000, # 总样本量
@@ -1218,8 +1221,8 @@ generate_mr_trio_data_matrix_ultra <- function(
     crowd_differences = 0, # 用于模拟两个具有不同等位基因频率的亚群
     # --- 其他效应 ---
     beta_exp_to_out = 0, # 暴露对结局的真实因果效应
-    beta_confounding_exp = 0.2, # 影响暴露的混杂因素的方差 (效应大小为1)
-    beta_confounding_out = 0.2, # 影响结局的混杂因素的方差 (效应大小为1)
+    confounding_exp = 0.2, # 影响暴露的混杂因素的方差 (效应大小为1)
+    confounding_out = 0.2, # 影响结局的混杂因素的方差 (效应大小为1)
     correlation = 0.2, # 共享环境因素的方差
     seed = NULL) {
   # --- 1. 生成水平多效性的系数 ---
@@ -1254,10 +1257,11 @@ generate_mr_trio_data_matrix_ultra <- function(
   )
   # --- 2. 生成间接遗传异质性的系数 ---
   beta_exp_processing <- function(beta_exp,
-                                  h_beta_exp, ...) {
+                                  h_beta_exp, n_snps, n_pleiotropic) {
     beta_exp_matrix <- rep(beta_exp, n_snps)
     h_beta_exp_index <- sample(1:n_snps, n_pleiotropic)
     beta_exp_matrix[h_beta_exp_index] <- h_beta_exp
+    beta_exp_matrix <- as.matrix(beta_exp_matrix)
     return(beta_exp_matrix)
   }
   beta_fs_to_oe_exp_matrix <- beta_exp_processing(
@@ -1269,7 +1273,7 @@ generate_mr_trio_data_matrix_ultra <- function(
     h_beta_fs_to_oe_exp, n_snps, 0
   )
   beta_os_to_oe_exp_matrix <- beta_exp_processing(
-    beta_fs_to_oe_exp,
+    beta_os_to_oe_exp,
     h_beta_fs_to_oe_exp, n_snps, 0
   )
   h_beta_fs_to_oe_exp_matrix <- beta_exp_processing(
@@ -1278,11 +1282,11 @@ generate_mr_trio_data_matrix_ultra <- function(
   )
   h_beta_ms_to_oe_exp_matrix <- beta_exp_processing(
     beta_ms_to_oe_exp,
-    h_beta_fs_to_oe_exp, n_snps, n_pleiotropic
+    h_beta_ms_to_oe_exp, n_snps, n_pleiotropic
   )
   h_beta_os_to_oe_exp_matrix <- beta_exp_processing(
-    beta_fs_to_oe_exp,
-    h_beta_fs_to_oe_exp, n_snps, n_pleiotropic
+    beta_os_to_oe_exp,
+    h_beta_os_to_oe_exp, n_snps, n_pleiotropic
   )
   # --- 3. 生成两个数据 ---
   data_exp <- generate_mr_trio_data_matrix(
@@ -1306,6 +1310,7 @@ generate_mr_trio_data_matrix_ultra <- function(
     # 选型婚配强度
     assortative_mating_strength = assortative_mating_strength
   )
+
   data_out <- generate_mr_trio_data_matrix(
     n = n, n_snps = n_snps, # 每一个数据集的snps个数
     p_f = p_f, p_m = p_m, # p_m 当前未在SNP生成中使用
